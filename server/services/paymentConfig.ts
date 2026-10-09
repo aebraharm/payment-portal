@@ -136,6 +136,13 @@ export async function saveWesternUnion(
     `UPDATE western_union_config SET enabled = $1, config = $2::jsonb, updated_at = $3, updated_by = $4 WHERE id = 1`,
     [input.enabled, JSON.stringify(parsed.data), now, actor.id],
   );
+  // One switch for clients: the method is offered exactly when its configuration is switched on.
+  await db.query('UPDATE payment_methods SET enabled = $2, updated_at = $3, updated_by = $4 WHERE method = $1', [
+    'western_union',
+    input.enabled,
+    now,
+    actor.id,
+  ]);
   const changed = Object.keys(parsed.data).filter(
     (key) => JSON.stringify((before.config as Record<string, unknown>)[key]) !== JSON.stringify((parsed.data as Record<string, unknown>)[key]),
   );
