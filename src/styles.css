@@ -1,0 +1,160 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ------------------------------------------------------------------------ */
+/* Design tokens. Brand colors are CSS variables so the Admin Portal can    */
+/* rebrand the whole product at runtime without rebuilding.                  */
+/* ------------------------------------------------------------------------ */
+:root {
+  --brand-primary: #2563eb;
+  --brand-primary-dark: #1d4ed8;
+  --brand-primary-soft: #eff6ff;
+  --brand-secondary: #0b2447;
+  --brand-secondary-soft: #e8eef7;
+  --brand-danger: #b91c1c;
+  --brand-success: #15803d;
+  --brand-warning: #b45309;
+  --surface: #ffffff;
+  --surface-muted: #f8fafc;
+  --border: #dbe4f0;
+  --text: #1e293b;
+  --text-muted: #64748b;
+  --shadow-card: 0 1px 3px rgba(11, 36, 71, 0.08), 0 8px 24px rgba(11, 36, 71, 0.06);
+  --shadow-card-hover: 0 4px 8px rgba(11, 36, 71, 0.1), 0 16px 32px rgba(11, 36, 71, 0.1);
+  --radius: 0.75rem;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-white text-slate-800 antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+  h1, h2, h3, h4 {
+    @apply text-navy-900;
+  }
+  a {
+    @apply transition-colors;
+  }
+  :focus-visible {
+    @apply outline-none ring-2 ring-offset-2;
+    ring-color: var(--brand-primary);
+  }
+  ::selection {
+    background-color: var(--brand-primary-soft);
+  }
+}
+
+@layer components {
+  /* ---------------- buttons (brand-aware) ---------------- */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold
+           transition-all duration-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2;
+  }
+  .btn-primary {
+    @apply text-white shadow-sm;
+    background-color: var(--brand-primary);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background-color: var(--brand-primary-dark);
+  }
+  .btn-secondary {
+    @apply border bg-white text-navy-800 hover:bg-slate-50;
+    border-color: var(--border);
+  }
+  .btn-danger {
+    @apply bg-red-600 text-white shadow-sm hover:bg-red-700;
+  }
+  .btn-ghost {
+    @apply text-navy-700 hover:bg-slate-100;
+  }
+  .btn-lg {
+    @apply px-6 py-3.5 text-base;
+  }
+  .btn-sm {
+    @apply px-3 py-1.5 text-xs;
+  }
+  .btn-ring {
+    --tw-ring-color: var(--brand-primary);
+  }
+
+  /* ---------------- form controls ---------------- */
+  .field-label {
+    @apply mb-1.5 block text-sm font-medium text-navy-800;
+  }
+  .field-input {
+    @apply block w-full rounded-xl border bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder-slate-400
+           transition-colors;
+    border-color: var(--border);
+  }
+  .field-input:focus {
+    border-color: var(--brand-primary);
+    --tw-ring-color: var(--brand-primary);
+    @apply ring-2 ring-offset-0 outline-none;
+  }
+  .field-input[aria-invalid='true'] {
+    @apply border-red-400 ring-red-200;
+  }
+  .field-hint {
+    @apply mt-1 text-xs text-slate-500;
+  }
+  .field-error {
+    @apply mt-1 text-xs font-medium text-red-600;
+  }
+
+  /* ---------------- cards & panels ---------------- */
+  .card {
+    @apply rounded-2xl border bg-white;
+    border-color: var(--border);
+    box-shadow: var(--shadow-card);
+  }
+  .card-hover {
+    @apply card transition-shadow duration-200 hover:shadow-card-hover;
+  }
+  .panel-info {
+    @apply rounded-2xl border border-blue-100 bg-brand-50 p-4;
+  }
+
+  /* ---------------- links ---------------- */
+  .link {
+    color: var(--brand-primary);
+    @apply font-medium hover:underline;
+  }
+
+  /* ---------------- skeletons ---------------- */
+  .skeleton {
+    @apply animate-shimmer rounded-md;
+    background: linear-gradient(90deg, #eef2f7 25%, #e2e9f3 37%, #eef2f7 63%);
+    background-size: 800px 100%;
+  }
+
+  /* ---------------- scrollbar ---------------- */
+  .thin-scrollbar::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .thin-scrollbar::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-slate-300;
+  }
+  .thin-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+/* ------------------------------------------------------------------------ */
+/* Motion preferences                                                        */
+/* ------------------------------------------------------------------------ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
