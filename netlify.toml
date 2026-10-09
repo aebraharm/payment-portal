@@ -1,0 +1,37 @@
+# Netlify: the single-page app is built to dist/. The JSON API runs as a Netlify Function at /api/*.
+# The database must be an external PostgreSQL service (DATABASE_URL). Receipts must use S3-compatible
+# private storage (RECEIPT_STORAGE=s3). See docs/DEPLOYMENT.md for the full list of environment variables.
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+  functions = "netlify/functions"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[functions]
+  node_bundler = "esbuild"
+  # The embedded development database is never bundled into production functions.
+  external_node_modules = ["@electric-sql/pglite"]
+
+# Single-page app fallback. Real files (assets, favicon) are served directly.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=()"
+    Cross-Origin-Opener-Policy = "same-origin"
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
