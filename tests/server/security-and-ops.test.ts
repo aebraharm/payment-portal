@@ -16,6 +16,7 @@ import {
   adminLogin,
   call,
   clientCall,
+  clientLogin,
   createTestEnv,
   seedPortal,
   type TestEnv,
@@ -233,5 +234,34 @@ describe('shared rules used by both sides', () => {
     const badRouting = validateBankFields('USD', 'ach', { routing_number: '021000022', account_number: '123456789', beneficiary_name: 'Agency Ltd', bank_name: 'Test Bank', account_type: 'checking' });
     expect(badRouting.valid).toBe(false);
     expect(Object.keys(badRouting.errors)).toContain('routing_number');
+  });
+});
+
+describe('client data isolation', () => {
+  let env: TestEnv;
+  let seed: Awaited<ReturnType<typeof seedPortal>>;
+
+  beforeAll(async () => {
+    env = await createTestEnv();
+    seed = await seedPortal(env);
+  });
+  afterAll(async () => {
+    await env.cleanup();
+  });
+
+  it('shows a client only their own invoices and references', async () => {
+    const other = await call(env, '/api/admin/clients', { session: seed.admin, json: { fullName: 'Ngozi Eze', email: 'ngozi@example.test', phone: '' } });
+    const invite = await call(env, `/api/admin/clients/${other.body.client.id}/invitation`, { session: seed.admin, json: {} });
+    const token = /#token=([A-Za-z0-9_-]+)/.exec(invite.body.activationUrl)![1];
+    await call(env, '/api/client/auth/activation/complete', { json: { token, accessCode: 'ngozi-access-2026' } });
+    const otherSession = await clientLogin(env, 'Ngozi Eze', 'ngozi-access-2026');
+
+    const foreignInvoice = await clientCall(env, `/api/client/invoices/${seed.invoiceId}`, otherSession);
+    expect(foreignInvoice.status).toBe(404);
+    const foreignDashboard = await clientCall(env, '/api/client/dashboard', otherSession);
+    expect(foreignDashboard.status).toBe(200);
+    expect(foreignDashboard.body.invoices).toHaveLength(0);
+    const mine = await clientCall(env, '/api/client/dashboard', seed.client);
+    expect(mine.body.invoices.map((i: { id: string }) => i.id)).toContain(seed.invoiceId);
   });
 });
