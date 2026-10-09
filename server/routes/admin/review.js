@@ -192,6 +192,12 @@ router.post(
 
     tx(() => {
       const now = isoNow();
+      // Re-read inside the write transaction so the status check is atomic
+      // with the update — two concurrent reviews cannot both apply.
+      const current = get('SELECT status FROM payment_confirmations WHERE id = ?', [row.id]);
+      if (!current || !['submitted', 'under_review', 'info_requested', 'rejected'].includes(current.status)) {
+        throw badRequest(`Cannot review a transaction with status "${current ? current.status : 'unknown'}".`);
+      }
       if (action === 'under_review') {
         run(
           `UPDATE payment_confirmations SET status = 'under_review', reviewer_id = ?, reviewed_at = ?, updated_at = ? WHERE id = ?`,
@@ -243,14 +249,7 @@ router.post(
           [row.id, 'info_requested', reason.trim(), 'admin', req.admin.id, now]
         );
       }
-      if (note && note.trim() && action !== 'rejected' && action !== 'info_requested') {
-        run('INSERT INTO admin_notes (confirmation_id, note, admin_id, created_at) VALUES (?, ?, ?, ?)', [
-          row.id,
-          note.trim(),
-          req.admin.id,
-          now,
-        ]);
-      } else if (note && note.trim()) {
+      if (note && note.trim()) {
         run('INSERT INTO admin_notes (confirmation_id, note, admin_id, created_at) VALUES (?, ?, ?, ?)', [
           row.id,
           note.trim(),
@@ -269,7 +268,6 @@ router.post(
 
     // Notify the client about outcomes (email only if SMTP is configured).
     const client = get('SELECT * FROM clients WHERE id = ?', [row.client_id]);
-    const invoice = get('SELECT * FROM invoices WHERE id = ?', [row.invoice_id]);
     const vars = {
       client_name: client?.full_name,
       payment_ref: row.ref_code,
@@ -314,7 +312,5 @@ router.post(
     res.status(201).json({ ok: true });
   })
 );
-
-void getSetting;
 
 export default router;

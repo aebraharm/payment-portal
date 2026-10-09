@@ -4,7 +4,6 @@ import path from 'node:path';
 import { asyncHandler } from '../lib/http.js';
 import { getPublicBranding, getEnabledCurrencies, getEnabledPaymentMethods, getSetting } from '../lib/settings.js';
 import { config } from '../config.js';
-import { parseJson } from '../db.js';
 
 const router = Router();
 
@@ -62,8 +61,5 @@ router.get(
     fs.createReadStream(resolved).pipe(res);
   })
 );
-
-// Keep parseJson import used for future public config payloads.
-void parseJson;
 
 export default router;

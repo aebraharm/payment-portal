@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getDb, run, get, isoNow } from './db.js';
+import { getDb, run, isoNow } from './db.js';
 
 const migrationsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'migrations');
 

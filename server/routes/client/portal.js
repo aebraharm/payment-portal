@@ -4,7 +4,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import { run, get, all, tx, isoNow, parseJson } from '../../db.js';
 import { generatePaymentRef } from '../../lib/refs.js';
-import { asyncHandler, badRequest, notFound, forbidden, conflict, zodError } from '../../lib/http.js';
+import { asyncHandler, badRequest, notFound, conflict, zodError } from '../../lib/http.js';
 import { audit } from '../../lib/audit.js';
 import { requireClient } from '../../middleware/auth.js';
 import { notifyFromTemplate } from '../../lib/notify.js';
@@ -17,7 +17,7 @@ import {
 } from '../../lib/settings.js';
 import { buildBankTransferSnapshot, buildWesternUnionSnapshot, getAvailableMethodsForCurrency } from '../../lib/instructions.js';
 import { formatMoney, parseAmountToCents } from '../../lib/money.js';
-import { validateFileBuffer, storeFile, sha256, safeSubdir, RECEIPT_MIME_TYPES, FileValidationError } from '../../lib/storage.js';
+import { validateFileBuffer, storeFile, sha256, RECEIPT_MIME_TYPES, FileValidationError } from '../../lib/storage.js';
 import { CARD_LABEL } from '../../lib/paymentConfig.js';
 
 const router = Router();
@@ -679,7 +679,5 @@ router.get(
     });
   })
 );
-
-void forbidden;
 
 export default router;

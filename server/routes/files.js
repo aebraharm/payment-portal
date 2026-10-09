@@ -46,7 +46,7 @@ router.get(
     res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
     res.setHeader(
       'Content-Disposition',
-      `inline; filename="${receipt.original_filename.replace(/[^\w.\-]+/g, '_')}"`
+      `inline; filename="${receipt.original_filename.replace(/[^\w.-]+/g, '_')}"`
     );
     res.setHeader('Cache-Control', 'private, no-store');
     fs.createReadStream(resolved).pipe(res);

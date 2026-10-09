@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../../api/client';
 import { useClientAuth } from '../../context/ClientAuthContext';
 import { useBranding } from '../../context/BrandingContext';
-import { formatMoney, formatDate, daysUntil } from '../../lib/format';
+import { formatDate, daysUntil } from '../../lib/format';
 import { InvoiceStatusBadge } from '../../components/ui/Badge';
 import { Card } from '../../components/ui/Card';
 import { EmptyState } from '../../components/ui/EmptyState';

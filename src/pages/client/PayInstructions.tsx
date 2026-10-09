@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, ApiError } from '../../api/client';
-import { formatMoney, formatDate } from '../../lib/format';
+import { formatDate } from '../../lib/format';
 import { Card } from '../../components/ui/Card';
 import { LoadingScreen } from '../../components/ui/Spinner';
 import { Alert } from '../../components/ui/Alert';

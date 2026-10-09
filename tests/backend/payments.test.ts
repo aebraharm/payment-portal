@@ -326,6 +326,7 @@ describe('payment workflow', () => {
   it('disabling a payment method prevents new selections', async () => {
     const methods = await admin.get('/api/admin/payment-methods');
     const wuMethod = methods.body.methods.find((m: any) => m.code === 'western_union');
+    expect(wuMethod.enabled).toBe(true);
     const toPayload = (ms: any[], wuEnabled: boolean) => ({
       methods: ms.map((m: any, i: number) => ({
         code: m.code,

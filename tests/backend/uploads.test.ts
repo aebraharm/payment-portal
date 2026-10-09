@@ -13,7 +13,6 @@ import {
   submitConfirmation,
   PNG_BUFFER,
   get,
-  all,
   config,
 } from './helpers';
 

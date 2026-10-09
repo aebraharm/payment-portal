@@ -1,16 +1,10 @@
 import { useState } from 'react';
-import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAdminAuth } from '../../context/AdminAuthContext';
 import { BrandLogo } from './BrandLogo';
 import { PageLoader } from '../ui/Spinner';
 import {
-  IconBank,
-  IconBell,
-  IconCard,
-  IconChart,
-  IconChevronRight,
   IconDoc,
-  IconGlobe,
   IconHome,
   IconList,
   IconLogout,

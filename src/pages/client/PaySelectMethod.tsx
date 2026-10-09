@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../../api/client';
-import { formatMoney, formatDate } from '../../lib/format';
+import { formatDate } from '../../lib/format';
 import { Card } from '../../components/ui/Card';
-import { PageLoader, LoadingScreen } from '../../components/ui/Spinner';
+import { LoadingScreen } from '../../components/ui/Spinner';
 import { Alert } from '../../components/ui/Alert';
 import { PageHeader } from '../../components/shared';
 import { Button } from '../../components/ui/Button';

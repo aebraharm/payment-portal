@@ -1,13 +1,12 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { get, run, isoNow, parseJson } from '../db.js';
+import { get, run, isoNow } from '../db.js';
 import {
   createSession,
   verifyPassword,
   hashPassword,
   verifyAccessCode,
   revokeSession,
-  revokeAllSessionsForActor,
 } from '../lib/tokens.js';
 import { asyncHandler, badRequest, unauthorized, forbidden, zodError } from '../lib/http.js';
 import { audit } from '../lib/audit.js';
@@ -19,7 +18,7 @@ const router = Router();
 
 const PASSWORD_MIN = 10;
 
-function passwordSchema(field = 'newPassword') {
+function passwordSchema() {
   return z
     .string()
     .min(PASSWORD_MIN, `Password must be at least ${PASSWORD_MIN} characters.`)
@@ -269,9 +268,5 @@ router.post(
     });
   })
 );
-
-// Referenced so tree-shaking keeps parseJson usage explicit for future auth payloads.
-void parseJson;
-void revokeAllSessionsForActor;
 
 export default router;

@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- context files export a provider component plus its hook */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api, ApiError } from '../api/client';
 

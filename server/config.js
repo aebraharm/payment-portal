@@ -14,7 +14,6 @@ export const config = {
   rootDir,
   databasePath: process.env.DATABASE_PATH || path.join(rootDir, 'server/data/portal.db'),
   uploadDir: process.env.UPLOAD_DIR || path.join(rootDir, 'server/uploads'),
-  sessionSecret: process.env.SESSION_SECRET || 'dev-only-insecure-secret-change-me',
   sessionTtlHours: Number(process.env.SESSION_TTL_HOURS) || 8,
   adminBootstrap: {
     email: process.env.ADMIN_EMAIL || 'portal11@gmail.com',

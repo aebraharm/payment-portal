@@ -25,7 +25,7 @@ DATABASE_PATH=/var/lib/payment-portal/portal.db
 UPLOAD_DIR=/var/lib/payment-portal/uploads
 ADMIN_EMAIL=admin@your-agency.com
 ADMIN_PASSWORD=<long random initial password>
-SESSION_SECRET=<64+ random hex chars>
+# Sessions are random 256-bit tokens stored hashed in the DB — no secret needed.
 SESSION_TTL_HOURS=8
 # Optional email (without SMTP, notifications are recorded as "not configured")
 SMTP_HOST=smtp.your-provider.com
@@ -145,7 +145,7 @@ Restore by copying the files back and restarting the service.
 
 - [ ] `.env` is on the server only, readable by the service user only
       (`chmod 600 .env`).
-- [ ] `SESSION_SECRET` and `ADMIN_PASSWORD` are long random values.
+- [ ] `ADMIN_PASSWORD` is a long random value (changed on first login).
 - [ ] TLS is enabled; `NODE_ENV=production` is set.
 - [ ] `DATABASE_PATH` and `UPLOAD_DIR` live on a backed-up volume and are
       **not** inside any statically-served directory.
@@ -175,7 +175,60 @@ npm run seed        # idempotent — adds new defaults only
 systemctl restart payment-portal
 ```
 
-## 10. Scaling notes
+## 10. Can this deploy to Netlify? (serverless assessment)
+
+**Short answer: not with the current architecture.** The frontend builds and
+could be served by Netlify's static hosting, but the backend cannot run there.
+
+### What works on Netlify
+
+- `npm run build` produces a static `dist/` that Netlify can serve as-is
+  (set the build command to `npm run build` and the publish directory to
+  `dist`; SPA redirects are handled by the built-in `index.html` fallback —
+  add a `netlify.toml` with `[[redirects]] from = "/*" to = "/index.html"
+  status = 200` for client-side routes).
+
+### Precise blockers
+
+1. **Persistent Express server required.** The whole API is one long-lived
+   Express process (`server/index.js`). Netlify only runs static files and
+   short-lived serverless Functions — there is no way to run a persistent
+   Node server.
+2. **SQLite on a local filesystem.** The database is a SQLite file
+   (`node:sqlite`) written to `DATABASE_PATH`. Netlify Functions have a
+   read-only filesystem (except ephemeral `/tmp`), so the database would not
+   persist between invocations and writes would fail.
+3. **Receipt/logo storage on a local filesystem.** Uploaded receipts and the
+   branding logo are written under `UPLOAD_DIR` and streamed back through an
+   authenticated Express route. Serverless invocations cannot share or persist
+   that directory.
+4. **In-memory rate limiting.** `express-rate-limit` uses an in-memory store;
+   across many isolated Function invocations it does not actually limit
+   anything. A serverless deployment needs a shared store (e.g. Upstash).
+5. **DB-backed sessions** would also need to move to the external database.
+
+### Recommended path if Netlify is a hard requirement
+
+Treat it as a real migration project (do not attempt it casually):
+
+1. Move the API into Netlify Functions (or Netlify's Express adapter) — the
+   route code is plain Express and ports over largely unchanged.
+2. Replace SQLite with a network database: **Turso (libSQL)** is the closest
+   drop-in for SQLite; Neon/Supabase Postgres also works (`server/db.js` is
+   the only data-access layer to adapt).
+3. Move receipt/logo storage to **Netlify Blobs** or S3-compatible object
+   storage, and stream files through an authenticated Function.
+4. Replace the in-memory rate limiter with a shared store (Upstash Redis).
+5. Re-verify the full test suite against the new data layer.
+
+### Recommended path otherwise (no code changes)
+
+Deploy the app as-is to any VPS, container platform, or Node host — see the
+systemd/nginx instructions above. This is the intended production setup: one
+process, one SQLite file (WAL), one private uploads directory, all of which
+Netlify's serverless model does not provide.
+
+## 11. Scaling notes
 
 - SQLite (WAL mode) comfortably serves a single-agency workload. If you ever
   need multiple app instances, move `DATABASE_PATH`/`UPLOAD_DIR` to shared

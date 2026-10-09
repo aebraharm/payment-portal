@@ -102,7 +102,7 @@ export function AdminDashboard() {
     color: STATUS_COLORS[status] || '#94a3b8',
   }));
 
-  const outstandingChart = stats.outstandingByCurrency.map((c, i) => ({
+  const outstandingChart = stats.outstandingByCurrency.map((c) => ({
     label: c.currency,
     value: c.cents,
     color: undefined,

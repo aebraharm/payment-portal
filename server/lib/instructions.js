@@ -64,7 +64,6 @@ export function getAvailableMethodsForCurrency(currency) {
   const methods = all('SELECT * FROM payment_methods WHERE enabled = 1 ORDER BY sort_order, code');
   const out = [];
   for (const m of methods) {
-    const config = parseJson(m.config, {});
     if (m.code === 'card') {
       out.push({
         code: 'card',

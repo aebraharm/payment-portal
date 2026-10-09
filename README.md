@@ -87,7 +87,7 @@ npm install
 
 # 2. Configure environment (NEVER commit real credentials)
 cp .env.example .env
-$EDITOR .env        # set ADMIN_EMAIL, ADMIN_PASSWORD, SESSION_SECRET, ...
+$EDITOR .env        # set ADMIN_EMAIL, ADMIN_PASSWORD (see .env.example)
 
 # 3. Create/migrate the database and seed defaults + bootstrap admin
 npm run migrate
@@ -130,7 +130,6 @@ See `.env.example` for the full annotated list. The important ones:
 | `UPLOAD_DIR`      | no       | Private upload directory (never statically served)  |
 | `ADMIN_EMAIL`     | yes      | Bootstrap admin email (seeded once)                 |
 | `ADMIN_PASSWORD`  | yes      | Bootstrap admin initial password (change on login)  |
-| `SESSION_SECRET`  | yes      | Session token secret — use a long random string     |
 | `SMTP_*`          | no       | Email is optional; without it nothing is faked      |
 | `RATE_LIMIT_*`    | no       | Auth/general rate-limit tuning                      |
 

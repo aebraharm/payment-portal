@@ -1,13 +1,13 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { run, get, all, tx, isoNow, parseJson } from '../../db.js';
+import { run, get, all, isoNow } from '../../db.js';
 import { generateClientCode } from '../../lib/refs.js';
 import { generateAccessCode, hashAccessCode } from '../../lib/tokens.js';
 import { asyncHandler, badRequest, notFound, zodError } from '../../lib/http.js';
 import { audit } from '../../lib/audit.js';
 import { requireAdmin } from '../../middleware/auth.js';
 import { notifyFromTemplate } from '../../lib/notify.js';
-import { getSetting, getCurrency } from '../../lib/settings.js';
+import { getCurrency } from '../../lib/settings.js';
 import { formatMoney } from '../../lib/money.js';
 
 const router = Router();
@@ -151,7 +151,21 @@ router.get(
          FROM payment_confirmations pc JOIN payment_references pr ON pr.id = pc.payment_reference_id
         WHERE pc.client_id = ? ORDER BY pc.created_at DESC LIMIT 50`,
       [client.id]
-    );
+    ).map((r) => ({
+      id: r.id,
+      paymentReferenceId: r.payment_reference_id,
+      refCode: r.ref_code,
+      invoiceId: r.invoice_id,
+      method: r.method,
+      sentDate: r.sent_date,
+      amountSentCents: r.amount_sent_cents,
+      amountSentFormatted: formatMoney(r.amount_sent_cents, r.currency),
+      currency: r.currency,
+      status: r.status,
+      rejectionReason: r.rejection_reason,
+      reviewedAt: r.reviewed_at,
+      createdAt: r.created_at,
+    }));
     const notes = all(
       `SELECT an.*, a.email AS admin_email FROM admin_notes an LEFT JOIN admins a ON a.id = an.admin_id
         WHERE an.client_id = ? ORDER BY an.created_at DESC`,
@@ -307,7 +321,5 @@ function serializeInvoice(row) {
   };
 }
 
-// Keep tx import referenced for future multi-write endpoints.
-void tx;
 
 export default router;

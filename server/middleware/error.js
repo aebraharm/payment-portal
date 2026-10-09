@@ -8,7 +8,6 @@ export function notFoundHandler(req, res, next) {
   next();
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function errorHandler(err, req, res, _next) {
   let status = 500;
   let code = 'internal_error';

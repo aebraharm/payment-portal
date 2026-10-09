@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { api, ApiError } from '../../api/client';
-import { formatMoney, formatDate, todayIsoDate } from '../../lib/format';
+import { todayIsoDate } from '../../lib/format';
 import { Card } from '../../components/ui/Card';
 import { LoadingScreen, PageLoader } from '../../components/ui/Spinner';
 import { Alert } from '../../components/ui/Alert';
@@ -75,7 +75,6 @@ export function PaySubmit() {
   const { invoiceId } = useParams<{ invoiceId: string }>();
   const [searchParams] = useSearchParams();
   const refId = Number(searchParams.get('ref')) || 0;
-  const navigate = useNavigate();
 
   const [reference, setReference] = useState<Reference | null>(null);
   const [invoice, setInvoice] = useState<InvoiceDetail['invoice'] | null>(null);
