@@ -27,7 +27,10 @@ export const config = {
   uploadDir: process.env.UPLOAD_DIR || path.join(rootDir, 'server/uploads'),
   sessionTtlHours: Number(process.env.SESSION_TTL_HOURS) || 8,
   adminBootstrap: {
-    email: process.env.ADMIN_EMAIL || 'portal11@gmail.com',
+    // No built-in default for the email on purpose: the bootstrap administrator
+    // is only ever created from ADMIN_EMAIL / ADMIN_PASSWORD provided via the
+    // environment — never from a value committed to source control.
+    email: process.env.ADMIN_EMAIL || '',
     password: process.env.ADMIN_PASSWORD || '',
   },
   smtp: {

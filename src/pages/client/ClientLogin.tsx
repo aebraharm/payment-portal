@@ -82,7 +82,7 @@ export function ClientLogin() {
             <Input
               label="Full name"
               autoComplete="name"
-              placeholder="e.g. Adaeze Okafor"
+              placeholder="e.g. Jane Doe"
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
               error={fieldErrors.fullName}

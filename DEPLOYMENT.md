@@ -225,9 +225,10 @@ cd /opt/payment-portal && git status --short .env    # must print nothing
    admin password. The server blocks all other admin actions until you do.
 5. The initial password in `.env` is now only a bootstrap fallback — the seed
    never resets an existing admin's password, so **you can delete
-   `ADMIN_PASSWORD` from `.env` after the first login** (the seed then skips
-   admin creation; your changed password is safe). Restart the service after
-   editing `.env`.
+   `ADMIN_PASSWORD` from `.env` after the first login** (the seed creates the
+   admin only when both `ADMIN_EMAIL` and `ADMIN_PASSWORD` are set, and skips
+   admin creation otherwise; your changed password is safe). Restart the
+   service after editing `.env`.
 6. If the initial password ever leaks before first login, generate a new one,
    update `.env`, and delete the admin row only as a last resort (or re-seed a
    fresh database). Never share admin passwords in chat.
@@ -521,7 +522,7 @@ restarting. Test in a staging copy first if the update is significant.
 | `TRUST_PROXY` | no | `1` | Reverse-proxy hops in front of the app (1 = nginx; 2 = CDN + nginx) |
 | `DATABASE_PATH` | no | `server/data/portal.db` | SQLite database file |
 | `UPLOAD_DIR` | no | `server/uploads` | Private receipt/logo storage (never statically served) |
-| `ADMIN_EMAIL` | first run | `portal11@gmail.com` | Bootstrap admin email (created once) |
+| `ADMIN_EMAIL` | first run | `admin@example.com` | Bootstrap admin email (created once; required together with `ADMIN_PASSWORD` — no built-in default) |
 | `ADMIN_PASSWORD` | first run | — (unset = no admin created) | Bootstrap admin initial password; change forced on first login. Remove after first login |
 | `SESSION_TTL_HOURS` | no | `8` | Session lifetime |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_FROM` | no | — | Email delivery (see below) |

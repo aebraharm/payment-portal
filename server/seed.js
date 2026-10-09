@@ -77,25 +77,33 @@ export async function seedDatabase() {
   }
 
   // Bootstrap administrator — created once, never reset by re-running seed.
+  // Both ADMIN_EMAIL and ADMIN_PASSWORD must be provided via the environment;
+  // there is deliberately NO built-in default, so a deployment can never
+  // silently create an administrator with a publicly documented identity.
   const adminEmail = config.adminBootstrap.email;
-  const existingAdmin = get('SELECT id FROM admins WHERE email = ?', [adminEmail]);
-  if (!existingAdmin) {
-    const password = config.adminBootstrap.password;
-    if (!password) {
-      console.warn(
-        '[seed] WARNING: ADMIN_PASSWORD is not set. No administrator account was created. ' +
-          'Set ADMIN_EMAIL / ADMIN_PASSWORD in the environment and run `npm run seed`.'
-      );
-    } else {
+  const adminPassword = config.adminBootstrap.password;
+  const missing = [
+    ...(adminEmail ? [] : ['ADMIN_EMAIL']),
+    ...(adminPassword ? [] : ['ADMIN_PASSWORD']),
+  ];
+  if (missing.length > 0) {
+    console.warn(
+      `[seed] WARNING: ${missing.join(' and ')} ${missing.length > 1 ? 'are' : 'is'} not set. ` +
+        'No administrator account was created. Set both in the environment (never commit real ' +
+        'credentials to source control) and run `npm run seed` again.'
+    );
+  } else {
+    const existingAdmin = get('SELECT id FROM admins WHERE email = ?', [adminEmail]);
+    if (!existingAdmin) {
       run(
         `INSERT INTO admins (email, password_hash, role, full_name, status, must_change_password, created_at, updated_at)
          VALUES (?, ?, 'superadmin', 'Portal Administrator', 'active', 1, ?, ?)`,
-        [adminEmail, hashPassword(password), now, now]
+        [adminEmail, hashPassword(adminPassword), now, now]
       );
       console.log(`[seed] bootstrap administrator created: ${adminEmail} (password change required on first login)`);
+    } else {
+      console.log(`[seed] administrator ${adminEmail} already exists — left unchanged (idempotent).`);
     }
-  } else {
-    console.log(`[seed] administrator ${adminEmail} already exists — left unchanged (idempotent).`);
   }
 
   const counts = {

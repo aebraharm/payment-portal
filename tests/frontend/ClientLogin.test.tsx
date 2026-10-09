@@ -102,19 +102,19 @@ describe('ClientLogin page', () => {
     const user = userEvent.setup();
     mockPost.mockImplementation((path: string) => {
       if (path === '/api/client/auth/login') {
-        return Promise.resolve({ client: { id: 1, fullName: 'Adaeze Okafor', clientCode: 'CL-2026-0001', status: 'active' } });
+        return Promise.resolve({ client: { id: 1, fullName: 'Jane Doe', clientCode: 'CL-2026-9001', status: 'active' } });
       }
       return Promise.reject(new Error(`unexpected POST ${path}`));
     });
     renderLogin();
     await screen.findByText('Client portal sign in');
-    await user.type(screen.getByLabelText(/full name/i), 'Adaeze Okafor');
-    await user.type(screen.getByLabelText(/access code/i), 'czgv7euz');
+    await user.type(screen.getByLabelText(/full name/i), 'Jane Doe');
+    await user.type(screen.getByLabelText(/access code/i), 'testcode1');
     await user.click(screen.getByRole('button', { name: /sign in securely/i }));
     await waitFor(() => {
       expect(mockPost).toHaveBeenCalledWith('/api/client/auth/login', {
-        fullName: 'Adaeze Okafor',
-        accessCode: 'CZGV7EUZ',
+        fullName: 'Jane Doe',
+        accessCode: 'TESTCODE1',
       });
     });
   });
