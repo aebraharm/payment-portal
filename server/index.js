@@ -21,8 +21,15 @@ async function main() {
   }
 
   const app = createApp({ spaHandler });
-  app.listen(config.port, '0.0.0.0', () => {
-    console.log(`[server] Payment portal listening on http://0.0.0.0:${config.port} (${config.env})`);
+  const host = config.host;
+  app.listen(config.port, host, () => {
+    console.log(`[server] Payment portal listening on http://${host}:${config.port} (${config.env})`);
+    if (config.isProduction && host !== '127.0.0.1' && host !== '::1') {
+      console.warn(
+        '[server] WARNING: production is bound to a non-loopback address. ' +
+          'Prefer the default HOST=127.0.0.1 behind a reverse proxy so the API is not directly reachable.'
+      );
+    }
   });
 }
 

@@ -11,6 +11,17 @@ export const config = {
   isProduction: (process.env.NODE_ENV || 'development') === 'production',
   isTest: (process.env.NODE_ENV || 'test') === 'test' || !!process.env.VITEST,
   port: Number(process.env.PORT) || 4000,
+  // Bind address. Production defaults to loopback so the API is reachable
+  // only through the reverse proxy; set HOST=0.0.0.0 to deliberately expose
+  // the app without a proxy (not recommended). Development keeps 0.0.0.0 so
+  // the sandbox/dev preview proxy can reach the dev server.
+  host:
+    process.env.HOST ||
+    ((process.env.NODE_ENV || 'development') === 'production' ? '127.0.0.1' : '0.0.0.0'),
+  // Number of reverse-proxy hops in front of the app (1 = nginx directly in
+  // front, the documented topology). Increase when adding e.g. Cloudflare.
+  // Only safe because production binds loopback by default.
+  trustProxy: Number(process.env.TRUST_PROXY ?? 1) || 1,
   rootDir,
   databasePath: process.env.DATABASE_PATH || path.join(rootDir, 'server/data/portal.db'),
   uploadDir: process.env.UPLOAD_DIR || path.join(rootDir, 'server/uploads'),

@@ -167,9 +167,11 @@ npm test
 
 ## Deployment
 
-See **[DEPLOYMENT.md](./DEPLOYMENT.md)** for the production checklist:
-building, environment variables, reverse proxy (nginx), TLS, backups of
-`server/data` + `server/uploads`, and optional SMTP.
+See **[DEPLOYMENT.md](./DEPLOYMENT.md)** for a beginner-friendly, step-by-step
+VPS deployment guide (server setup, firewall, Node 22, nginx + Let's Encrypt,
+systemd supervision, health checks, backups **with restore testing**, logging,
+updates, and secure email configuration), plus the full environment-variable
+reference, security checklist, and a Netlify/serverless assessment.
 
 ## License
 
