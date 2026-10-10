@@ -15,10 +15,21 @@ interface ModalProps {
 export function Modal({ open, onClose, title, description, children, footer, size = 'md' }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
 
+  // Callers pass inline `onClose` arrows, so its identity changes on every parent
+  // render. Keep the latest callback in a ref instead of listing it as an effect
+  // dependency: otherwise the open effect re-runs on each keystroke inside the
+  // dialog and re-focuses the dialog, stealing focus from the field being typed in.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
+
   useEffect(() => {
     if (!open) return;
+    // Remember what had focus so it can be restored when the dialog closes.
+    const previouslyFocused = document.activeElement as HTMLElement | null;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') onCloseRef.current();
     };
     document.addEventListener('keydown', onKey);
     const previousOverflow = document.body.style.overflow;
@@ -27,8 +38,11 @@ export function Modal({ open, onClose, title, description, children, footer, siz
     return () => {
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = previousOverflow;
+      if (previouslyFocused && previouslyFocused.isConnected && typeof previouslyFocused.focus === 'function') {
+        previouslyFocused.focus();
+      }
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
   const sizeClass = size === 'sm' ? 'max-w-md' : size === 'lg' ? 'max-w-3xl' : 'max-w-xl';
