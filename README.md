@@ -64,9 +64,10 @@ server/
   app.js / index.js       Express app factory + dev/prod entrypoint
   middleware/             auth, security (rate limits, CSP), error handling
   lib/                    money, refs, tokens, audit, notify, storage, settings,
-                          paymentConfig, instructions (snapshots)
+                          paymentConfig, instructions (snapshots), spa (fallback)
   routes/                 public, auth, files, admin/*, client/portal
 src/
+  App.tsx / routes.tsx    providers + the single client-side route table
   api/client.ts           typed API wrapper (JSON + multipart, ApiError)
   context/                Branding, ClientAuth, AdminAuth providers
   components/ui/          design system (buttons, badges, charts, modals, ...)
@@ -77,6 +78,8 @@ src/
 tests/
   backend/                supertest API suites (auth, payments, config, uploads)
   frontend/               jsdom component/page tests
+  deploy/                 netlify.toml / SPA routing config checks
+netlify.toml              Netlify build, SPA fallback, security headers
 ```
 
 ## Getting started
@@ -98,12 +101,18 @@ npm run dev
 ```
 
 Open http://localhost:4000 — the **client portal** is at `/`, the **admin
-portal** at `/admin/login`.
+portal** at `/admin/login` (also linked from the bottom of the client sign-in
+page, since staff need a way in from the page they already have bookmarked).
 
+- Both portals are routes of **one** SPA on **one** origin, so `/admin/login`
+  must resolve to `index.html` on a direct visit or a refresh. `netlify.toml`
+  provides that on Netlify and `server/lib/spa.js` provides it on the VPS;
+  `/api/*` is always matched first so a missing endpoint stays a JSON 404.
 - Bootstrap admin: the `ADMIN_EMAIL` / `ADMIN_PASSWORD` from `.env`.
   The first login forces a password change.
 - To create a client: sign in to the admin portal → Clients → New client.
   The access code is shown **once** — copy it to the client.
+
 
 ## Scripts
 
@@ -113,7 +122,7 @@ portal** at `/admin/login`.
 | `npm run build`      | Type-check + production frontend build to `dist/`    |
 | `npm start`          | Production server: serves `dist/` + API (SPA fallback) |
 | `npm run typecheck`  | `tsc` type-check                                     |
-| `npm test`           | Full test suite (75 tests: API + UI)                 |
+| `npm test`           | Full test suite (96 tests: API + UI + deploy config)  |
 | `npm run lint`       | ESLint                                               |
 | `npm run migrate`    | Apply database migrations                            |
 | `npm run seed`       | Idempotent seed (currencies, methods, settings, admin) |

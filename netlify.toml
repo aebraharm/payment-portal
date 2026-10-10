@@ -1,0 +1,45 @@
+# Netlify configuration — immigration agency payment portal.
+#
+# STAGE 1 (this file as it stands): static app + SPA routing only.
+# Netlify serves the Vite build from `dist/` and rewrites every unknown path to
+# `index.html` so client-side routes (/, /login, /admin/login, /transactions/42,
+# …) survive a direct visit or a browser refresh.
+#
+# NOT YET ON NETLIFY: the API. `/api/*` is still served by the Express process
+# (see server/app.js + DEPLOYMENT.md Part A). A static-only Netlify site has no
+# backend, so do not point production at Netlify until the serverless migration
+# lands; when it does, the `/api/*` Function rewrite is added ABOVE this SPA
+# fallback, because Netlify applies the first matching rule and a `/api/*`
+# request swallowed by `/*` would return index.html instead of JSON.
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# Single-page app fallback. Netlify serves a real file when one exists (e.g.
+# hashed assets under /assets/*), so only unknown paths reach index.html.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Response headers for the static app, mirroring the CSP/security policy the
+# Express server sets (server/middleware/security.js) so both hosts behave alike.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "no-referrer"
+    Cross-Origin-Opener-Policy = "same-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=()"
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+
+# Vite emits content-hashed filenames, so they can be cached forever.
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

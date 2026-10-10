@@ -600,11 +600,34 @@ could be served by Netlify's static hosting, but the backend cannot run there.
 
 #### What works on Netlify
 
-- `npm run build` produces a static `dist/` that Netlify can serve as-is
-  (set the build command to `npm run build` and the publish directory to
-  `dist`; add a `netlify.toml` with
-  `[[redirects]] from = "/*" to = "/index.html" status = 200` for
-  client-side routes).
+- `npm run build` produces a static `dist/` that Netlify can serve as-is.
+  This is already configured: `netlify.toml` at the repo root sets
+  `command = "npm run build"`, `publish = "dist"` and the
+  `[[redirects]] from = "/*" to = "/index.html" status = 200` rule that client-
+  side routes need (see the next section).
+- The security headers the Express app sets are mirrored for the static app, so
+  a Netlify-served frontend is not less strict than the VPS one.
+
+#### Single-page routing (what the `/*` rule is for)
+
+The React app routes in the browser (`src/routes.tsx`); the server only ever
+owns `index.html`. Without a fallback, a **direct visit or a refresh** on any
+deep link — `/admin/login`, `/admin/clients/12`, `/pay/7/submit` — asks the host
+for a file that does not exist and returns 404 instead of the app.
+
+- **Netlify:** `netlify.toml` rewrites unknown paths to `/index.html` with status
+  200 (a rewrite, not a 301, so the URL — and therefore the route — survives).
+- **VPS:** the same behaviour is provided by `createSpaMiddleware()` in
+  `server/lib/spa.js`, mounted after the API routes in `server/app.js`, and real
+  files under `dist/` (hashed assets) are still served directly.
+- **`/api/*` always wins:** any API rule must be placed *before* the catch-all,
+  and the Express fallback passes `/api/*` back to the API stack. Otherwise a
+  miss on an endpoint returns HTML from `index.html` instead of a JSON 404,
+  which is a debugging nightmare and can confuse clients that parse JSON.
+- Both invariants are covered by tests: `tests/deploy/netlifyConfig.test.ts`
+  (parses `netlify.toml`, asserts the fallback is 200 and is the *last* rule) and
+  `tests/backend/spaFallback.test.ts` (deep link, refresh, assets, `/api/*`).
+- In development, Vite's own SPA fallback does this (`npm run dev`).
 
 #### Precise blockers
 

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useBranding } from '../../context/BrandingContext';
 import { useClientAuth } from '../../context/ClientAuthContext';
 import { api, ApiError } from '../../api/client';
@@ -7,7 +7,11 @@ import { BrandLogo } from '../../components/layout/BrandLogo';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Alert } from '../../components/ui/Alert';
-import { IconKey, IconLock, IconUsers } from '../../components/ui/Icons';
+import { IconArrowRight, IconKey, IconLock, IconShield, IconUsers } from '../../components/ui/Icons';
+
+/** Where agency staff sign in. A client-side route so the real admin auth
+ *  flow (AdminLogin + /api/admin/auth/login) is reused, never duplicated. */
+export const ADMIN_PORTAL_PATH = '/admin/login';
 
 export function ClientLogin() {
   const { branding } = useBranding();
@@ -112,6 +116,25 @@ export function ClientLogin() {
           </div>
 
           {showReset && <AccessCodeReset onDone={() => setShowReset(false)} />}
+
+          {/* Agency staff: same SPA, real admin authentication flow. */}
+          <div className="mt-6 border-t border-slate-100 pt-4">
+            <Link
+              to={ADMIN_PORTAL_PATH}
+              className="group flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-2.5 text-left transition-colors hover:border-brand-300 hover:bg-brand-50"
+            >
+              <span className="flex items-center gap-2.5">
+                <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-navy-900 text-white">
+                  <IconShield className="h-4 w-4" />
+                </span>
+                <span>
+                  <span className="block text-sm font-semibold text-navy-900">Admin Portal</span>
+                  <span className="block text-xs text-slate-500">Agency staff sign in</span>
+                </span>
+              </span>
+              <IconArrowRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5 group-hover:text-brand-600" />
+            </Link>
+          </div>
         </div>
         <p className="mt-6 text-center text-xs text-slate-400">
           Payments are only marked as received after review by our team. Never share your access code.

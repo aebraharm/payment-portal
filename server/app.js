@@ -6,6 +6,7 @@ import { migrate } from './migrate.js';
 import { helmetMiddleware, originCheck, generalLimiter } from './middleware/security.js';
 import { attachActors } from './middleware/auth.js';
 import { notFoundHandler, errorHandler } from './middleware/error.js';
+import { createSpaMiddleware } from './lib/spa.js';
 import { config } from './config.js';
 
 import publicRoutes from './routes/public.js';
@@ -60,11 +61,7 @@ export function createApp({ spaHandler } = {}) {
   } else if (config.isProduction) {
     const distDir = path.join(config.rootDir, 'dist');
     if (fs.existsSync(distDir)) {
-      app.use(express.static(distDir));
-      app.get('*', (req, res, next) => {
-        if (req.path.startsWith('/api/')) return next();
-        res.sendFile(path.join(distDir, 'index.html'));
-      });
+      app.use(createSpaMiddleware({ distDir }));
     }
   }
 
