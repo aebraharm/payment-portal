@@ -3,7 +3,22 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execScript, run, all, isoNow } from './db.js';
 
-const migrationsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'migrations');
+
+const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+
+const migrationCandidates = [
+  path.resolve(moduleDir, 'migrations'),
+  path.resolve(process.cwd(), 'server', 'migrations'),
+  path.resolve(moduleDir, '..', '..', 'server', 'migrations'),
+];
+
+const migrationsDir = migrationCandidates.find((dir) => fs.existsSync(dir));
+
+if (!migrationsDir) {
+  throw new Error(
+    `Migrations directory not found. Checked: ${migrationCandidates.join(', ')}`
+  );
+}
 
 export function pendingMigrations(applied) {
   return fs
