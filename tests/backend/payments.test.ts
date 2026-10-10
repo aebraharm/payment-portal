@@ -117,7 +117,7 @@ describe('payment workflow', () => {
     const inv = await clientAgent.get(`/api/client/invoices/${invoice.id}`);
     expect(inv.body.invoice.status).toBe('confirmation_submitted');
 
-    const row = get('SELECT status FROM payment_confirmations WHERE id = ?', [confirmation.id]);
+    const row = await get('SELECT status FROM payment_confirmations WHERE id = ?', [confirmation.id]);
     expect(row.status).toBe('submitted');
   });
 
@@ -137,9 +137,9 @@ describe('payment workflow', () => {
     const dup = await submitConfirmation(clientAgent, ref.body.reference.id, { amountSent: '2500.00' }, 'key-dup-2');
     expect(dup.status).toBe(409);
 
-    const count = get('SELECT COUNT(*) AS n FROM payment_confirmations WHERE payment_reference_id = ?', [
-      ref.body.reference.id,
-    ]).n;
+    const count = (
+      await get('SELECT COUNT(*) AS n FROM payment_confirmations WHERE payment_reference_id = ?', [ref.body.reference.id])
+    ).n;
     expect(count).toBe(1);
   });
 
@@ -167,7 +167,7 @@ describe('payment workflow', () => {
     const review = await admin.post(`/api/admin/transactions/${confirmationId}/review`).send({ action: 'verified', note: 'Bank statement matches' });
     expect(review.status).toBe(200);
 
-    const row = get(
+    const row = await get(
       'SELECT pc.status, pc.reviewer_id, pc.reviewed_at, i.status AS invoice_status FROM payment_confirmations pc JOIN invoices i ON i.id = pc.invoice_id WHERE pc.id = ?',
       [confirmationId]
     );
@@ -177,7 +177,7 @@ describe('payment workflow', () => {
     expect(row.invoice_status).toBe('paid');
 
     // Audit trail contains the verification.
-    const audit = all("SELECT * FROM audit_logs WHERE action = 'payment_verified'");
+    const audit = await all("SELECT * FROM audit_logs WHERE action = 'payment_verified'");
     expect(audit.length).toBeGreaterThan(0);
   });
 
@@ -213,7 +213,7 @@ describe('payment workflow', () => {
 
     const underReview = await admin.post(`/api/admin/transactions/${id}/review`).send({ action: 'under_review' });
     expect(underReview.status).toBe(200);
-    expect(get('SELECT status FROM payment_confirmations WHERE id = ?', [id]).status).toBe('under_review');
+    expect((await get('SELECT status FROM payment_confirmations WHERE id = ?', [id])).status).toBe('under_review');
 
     const noReason = await admin.post(`/api/admin/transactions/${id}/review`).send({ action: 'info_requested' });
     expect(noReason.status).toBe(400);
@@ -222,7 +222,7 @@ describe('payment workflow', () => {
       .post(`/api/admin/transactions/${id}/review`)
       .send({ action: 'info_requested', reason: 'Please provide the sender bank statement' });
     expect(info.status).toBe(200);
-    expect(get('SELECT status FROM payment_confirmations WHERE id = ?', [id]).status).toBe('info_requested');
+    expect((await get('SELECT status FROM payment_confirmations WHERE id = ?', [id])).status).toBe('info_requested');
   });
 
   it('keeps historical instruction snapshots when configuration changes', async () => {

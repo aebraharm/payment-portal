@@ -7,8 +7,8 @@ import { CARD_LABEL } from './paymentConfig.js';
  * issued. The snapshot is stored with the payment reference so later
  * configuration changes never alter historical transaction records.
  */
-export function buildBankTransferSnapshot(currency) {
-  const profile = get(
+export async function buildBankTransferSnapshot(currency) {
+  const profile = await get(
     'SELECT * FROM bank_instructions WHERE currency = ? AND enabled = 1 ORDER BY sort_order, id LIMIT 1',
     [currency]
   );
@@ -27,13 +27,13 @@ export function buildBankTransferSnapshot(currency) {
       transferTypes: parseJson(profile.transfer_types, []),
       fields: nonEmptyFields,
     },
-    generalInstructions: getSetting('payment_instructions') || '',
-    disclaimer: getSetting('payment_disclaimer') || '',
+    generalInstructions: await getSetting('payment_instructions') || '',
+    disclaimer: await getSetting('payment_disclaimer') || '',
   };
 }
 
-export function buildWesternUnionSnapshot() {
-  const row = get('SELECT * FROM western_union_config WHERE id = 1');
+export async function buildWesternUnionSnapshot() {
+  const row = await get('SELECT * FROM western_union_config WHERE id = 1');
   if (!row || !row.enabled) return null;
   return {
     type: 'western_union',
@@ -51,8 +51,8 @@ export function buildWesternUnionSnapshot() {
     receiptRequired: !!row.receipt_required,
     additionalNotes: row.additional_notes || '',
     helpText: row.help_text || '',
-    generalInstructions: getSetting('payment_instructions') || '',
-    disclaimer: getSetting('payment_disclaimer') || '',
+    generalInstructions: await getSetting('payment_instructions') || '',
+    disclaimer: await getSetting('payment_disclaimer') || '',
   };
 }
 
@@ -60,8 +60,8 @@ export function buildWesternUnionSnapshot() {
  * Compute which payment methods are selectable for a given invoice currency.
  * The card option is always reported as unavailable in this version.
  */
-export function getAvailableMethodsForCurrency(currency) {
-  const methods = all('SELECT * FROM payment_methods WHERE enabled = 1 ORDER BY sort_order, code');
+export async function getAvailableMethodsForCurrency(currency) {
+  const methods = await all('SELECT * FROM payment_methods WHERE enabled = 1 ORDER BY sort_order, code');
   const out = [];
   for (const m of methods) {
     if (m.code === 'card') {
@@ -75,10 +75,10 @@ export function getAvailableMethodsForCurrency(currency) {
       continue;
     }
     if (m.code === 'bank_transfer') {
-      const profileCount = get(
+      const profileCount = (await get(
         'SELECT COUNT(*) AS n FROM bank_instructions WHERE currency = ? AND enabled = 1',
         [currency]
-      ).n;
+      )).n;
       out.push({
         code: 'bank_transfer',
         name: m.name,
@@ -90,7 +90,7 @@ export function getAvailableMethodsForCurrency(currency) {
       continue;
     }
     if (m.code === 'western_union') {
-      const wu = get('SELECT * FROM western_union_config WHERE id = 1');
+      const wu = await get('SELECT * FROM western_union_config WHERE id = 1');
       const currencies = wu ? parseJson(wu.currencies, []) : [];
       const supported = !!wu && !!wu.enabled && currencies.includes(currency);
       out.push({
@@ -105,7 +105,7 @@ export function getAvailableMethodsForCurrency(currency) {
   }
   // Always surface the (disabled) card option so clients see the label.
   if (!out.some((m) => m.code === 'card')) {
-    const card = getPaymentMethod('card');
+    const card = await getPaymentMethod('card');
     out.push({
       code: 'card',
       name: card?.name || 'Card Payment',

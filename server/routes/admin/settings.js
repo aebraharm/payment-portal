@@ -147,7 +147,7 @@ function validateSettingsPayload(payload) {
 router.get(
   '/settings',
   asyncHandler(async (_req, res) => {
-    res.json({ settings: getAllSettings() });
+    res.json({ settings: await getAllSettings() });
   })
 );
 
@@ -162,13 +162,13 @@ router.put(
       if (e instanceof HttpError) throw e;
       throw zodError(e);
     }
-    setSettings(entries, req.admin.id);
-    audit(req, {
+    await setSettings(entries, req.admin.id);
+    await audit(req, {
       action: 'settings_updated',
       entity: 'settings',
       details: { keys: Object.keys(entries) },
     });
-    res.json({ ok: true, settings: getAllSettings() });
+    res.json({ ok: true, settings: await getAllSettings() });
   })
 );
 
@@ -187,7 +187,7 @@ router.post(
       if (e instanceof HttpError) throw e;
       throw zodError(e);
     }
-    const current = getAllSettings();
+    const current = await getAllSettings();
     const merged = { ...current, ...entries };
     const preview = {
       agencyName: merged.agency_name || '',
@@ -225,21 +225,21 @@ router.post(
         maxBytes: 2 * 1024 * 1024,
         label: 'Logo',
       });
-      const previous = get('SELECT value FROM settings WHERE key = ?', ['logo_path']);
-      const stored = storeFile({ buffer: req.file.buffer, subdir: 'branding', ext });
-      run(
+      const previous = await get('SELECT value FROM settings WHERE key = ?', ['logo_path']);
+      const stored = await storeFile({ buffer: req.file.buffer, subdir: 'branding', ext, contentType: mime });
+      await run(
         `INSERT INTO settings (key, value, updated_at, updated_by) VALUES ('logo_path', ?, ?, ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
         [JSON.stringify(stored.relativePath), isoNow(), req.admin.id]
       );
       if (previous) {
         try {
-          deleteStoredFile(JSON.parse(previous.value));
+          await deleteStoredFile(JSON.parse(previous.value));
         } catch {
           /* ignore */
         }
       }
-      audit(req, { action: 'branding_logo_uploaded', entity: 'settings', details: { mime, file: req.file.originalname } });
+      await audit(req, { action: 'branding_logo_uploaded', entity: 'settings', details: { mime, file: req.file.originalname } });
       res.json({ ok: true, logoPath: stored.relativePath, logoUrl: '/api/public/branding/logo' });
     } catch (e) {
       if (e instanceof FileValidationError) throw badRequest(e.message);
@@ -252,20 +252,20 @@ router.delete(
   '/settings/logo',
   requireConfigRole,
   asyncHandler(async (req, res) => {
-    const previous = get('SELECT value FROM settings WHERE key = ?', ['logo_path']);
-    run(
+    const previous = await get('SELECT value FROM settings WHERE key = ?', ['logo_path']);
+    await run(
       `INSERT INTO settings (key, value, updated_at, updated_by) VALUES ('logo_path', '""', ?, ?)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
       [isoNow(), req.admin.id]
     );
     if (previous) {
       try {
-        deleteStoredFile(JSON.parse(previous.value));
+        await deleteStoredFile(JSON.parse(previous.value));
       } catch {
         /* ignore */
       }
     }
-    audit(req, { action: 'branding_logo_removed', entity: 'settings' });
+    await audit(req, { action: 'branding_logo_removed', entity: 'settings' });
     res.json({ ok: true });
   })
 );
@@ -274,7 +274,7 @@ router.delete(
 router.get(
   '/settings/public-branding',
   asyncHandler(async (_req, res) => {
-    res.json({ branding: getPublicBranding() });
+    res.json({ branding: await getPublicBranding() });
   })
 );
 

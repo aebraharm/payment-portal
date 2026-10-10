@@ -12,8 +12,8 @@ import { formatMoney, parseAmountToCents } from '../../lib/money.js';
 const router = Router();
 router.use(requireAdmin);
 
-export function serializeInvoice(row) {
-  const currency = getCurrency(row.currency);
+export async function serializeInvoice(row) {
+  const currency = await getCurrency(row.currency);
   return {
     id: row.id,
     invoiceRef: row.invoice_ref,
@@ -28,10 +28,10 @@ export function serializeInvoice(row) {
     status: row.status,
     allowPartial: !!row.allow_partial,
     notes: row.notes,
-    lineItems: all(
+    lineItems: (await all(
       'SELECT * FROM invoice_line_items WHERE invoice_id = ? ORDER BY sort_order, id',
       [row.id]
-    ).map((li) => ({
+    )).map((li) => ({
       id: li.id,
       description: li.description,
       quantity: li.quantity,
@@ -104,22 +104,24 @@ router.get(
       params.push(Number(req.query.clientId));
     }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-    const total = get(
+    const total = (await get(
       `SELECT COUNT(*) AS n FROM invoices i LEFT JOIN clients c ON c.id = i.client_id ${whereSql}`,
       params
-    ).n;
-    const rows = all(
+    )).n;
+    const rows = await all(
       `SELECT i.*, c.full_name AS client_name, c.client_code
          FROM invoices i LEFT JOIN clients c ON c.id = i.client_id ${whereSql}
         ORDER BY i.created_at DESC LIMIT ? OFFSET ?`,
       [...params, pageSize, (page - 1) * pageSize]
     );
-    res.json({
-      total,
-      page,
-      pageSize,
-      invoices: rows.map((r) => ({ ...serializeInvoice(r), clientName: r.client_name, clientCode: r.client_code })),
-    });
+    // Sequential on purpose: `rows.map(async ...)` would hand res.json an array
+    // of promises, which serialises to []. One await per row also keeps the
+    // reads off each other's transaction on the hosted driver.
+    const invoices = [];
+    for (const r of rows) {
+      invoices.push({ ...(await serializeInvoice(r)), clientName: r.client_name, clientCode: r.client_code });
+    }
+    res.json({ total, page, pageSize, invoices });
   })
 );
 
@@ -135,20 +137,20 @@ router.post(
     if (new Date(body.dueDate) < new Date(body.issueDate)) {
       throw badRequest('Due date cannot be before the issue date.');
     }
-    const client = get('SELECT * FROM clients WHERE id = ?', [body.clientId]);
+    const client = await get('SELECT * FROM clients WHERE id = ?', [body.clientId]);
     if (!client) throw notFound('Client not found.');
     if (client.status !== 'active') throw badRequest('Cannot invoice a suspended client.');
-    const currency = getCurrency(body.currency.toUpperCase());
+    const currency = await getCurrency(body.currency.toUpperCase());
     if (!currency || !currency.enabled) {
       throw badRequest(`Currency ${body.currency.toUpperCase()} is not enabled. Enable it in Payment settings first.`);
     }
     const amountCents = computeAmountCents({ ...body, currency: body.currency.toUpperCase() });
-    const prefix = getSetting('invoice_ref_prefix') || 'INV';
-    const invoiceRef = generateInvoiceRef(prefix);
+    const prefix = await getSetting('invoice_ref_prefix') || 'INV';
+    const invoiceRef = await generateInvoiceRef(prefix);
     const now = isoNow();
 
-    const invoiceId = tx(() => {
-      const inserted = run(
+    const invoiceId = await tx(async () => {
+      const inserted = await run(
         `INSERT INTO invoices (invoice_ref, client_id, description, amount_cents, currency, issue_date, due_date, status, allow_partial, notes, created_by, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, 'unpaid', ?, ?, ?, ?, ?)`,
         [
@@ -167,17 +169,21 @@ router.post(
         ]
       );
       const id = inserted.lastInsertRowid;
-      (body.lineItems || []).forEach((li, idx) => {
+      // Awaited inside the transaction: a `forEach(async ...)` here would
+      // schedule the inserts after COMMIT and the line items would vanish.
+      let sortIndex = 0;
+      for (const li of body.lineItems || []) {
         const unit = parseAmountToCents(li.unitAmount);
-        run(
+        await run(
           'INSERT INTO invoice_line_items (invoice_id, description, quantity, unit_amount_cents, sort_order) VALUES (?, ?, ?, ?, ?)',
-          [id, li.description, li.quantity, unit, idx]
+          [id, li.description, li.quantity, unit, sortIndex]
         );
-      });
+        sortIndex += 1;
+      }
       return id;
     });
 
-    audit(req, {
+    await audit(req, {
       action: 'invoice_created',
       entity: 'invoice',
       entityId: invoiceId,
@@ -197,26 +203,26 @@ router.post(
         fallbackBody: `Hello ${client.full_name}, a new invoice ${invoiceRef} for ${formatMoney(amountCents, currency.code)} has been issued. Due date: ${body.dueDate}.`,
       });
     }
-    res.status(201).json({ invoice: serializeInvoice(get('SELECT * FROM invoices WHERE id = ?', [invoiceId])) });
+    res.status(201).json({ invoice: await serializeInvoice(await get('SELECT * FROM invoices WHERE id = ?', [invoiceId])) });
   })
 );
 
 router.get(
   '/invoices/:id',
   asyncHandler(async (req, res) => {
-    const row = get(
+    const row = await get(
       'SELECT i.*, c.full_name AS client_name, c.client_code FROM invoices i LEFT JOIN clients c ON c.id = i.client_id WHERE i.id = ?',
       [req.params.id]
     );
     if (!row) throw notFound('Invoice not found.');
-    res.json({ invoice: { ...serializeInvoice(row), clientName: row.client_name, clientCode: row.client_code } });
+    res.json({ invoice: { ...await serializeInvoice(row), clientName: row.client_name, clientCode: row.client_code } });
   })
 );
 
 router.put(
   '/invoices/:id',
   asyncHandler(async (req, res) => {
-    const row = get('SELECT * FROM invoices WHERE id = ?', [req.params.id]);
+    const row = await get('SELECT * FROM invoices WHERE id = ?', [req.params.id]);
     if (!row) throw notFound('Invoice not found.');
     if (['paid', 'partially_paid', 'cancelled', 'refunded'].includes(row.status)) {
       throw conflict(`Cannot edit an invoice with status "${row.status}".`);
@@ -236,7 +242,7 @@ router.put(
     if (body.dueDate && new Date(body.dueDate) < new Date(row.issue_date)) {
       throw badRequest('Due date cannot be before the issue date.');
     }
-    run(
+    await run(
       `UPDATE invoices SET description = ?, due_date = ?, allow_partial = ?, notes = ?, updated_at = ? WHERE id = ?`,
       [
         body.description ?? row.description,
@@ -247,8 +253,8 @@ router.put(
         row.id,
       ]
     );
-    audit(req, { action: 'invoice_updated', entity: 'invoice', entityId: row.id, details: { invoiceRef: row.invoice_ref } });
-    res.json({ invoice: serializeInvoice(get('SELECT * FROM invoices WHERE id = ?', [row.id])) });
+    await audit(req, { action: 'invoice_updated', entity: 'invoice', entityId: row.id, details: { invoiceRef: row.invoice_ref } });
+    res.json({ invoice: await serializeInvoice(await get('SELECT * FROM invoices WHERE id = ?', [row.id])) });
   })
 );
 
@@ -256,7 +262,7 @@ router.put(
 router.post(
   '/invoices/:id/cancel',
   asyncHandler(async (req, res) => {
-    const row = get('SELECT * FROM invoices WHERE id = ?', [req.params.id]);
+    const row = await get('SELECT * FROM invoices WHERE id = ?', [req.params.id]);
     if (!row) throw notFound('Invoice not found.');
     if (row.status === 'cancelled') throw conflict('Invoice is already cancelled.');
     if (['paid', 'partially_paid', 'refunded'].includes(row.status)) {
@@ -269,17 +275,17 @@ router.post(
     } catch (e) {
       throw zodError(e);
     }
-    run(
+    await run(
       `UPDATE invoices SET status = 'cancelled', cancelled_at = ?, cancel_reason = ?, updated_at = ? WHERE id = ?`,
       [isoNow(), body.reason, isoNow(), row.id]
     );
-    audit(req, {
+    await audit(req, {
       action: 'invoice_cancelled',
       entity: 'invoice',
       entityId: row.id,
       details: { invoiceRef: row.invoice_ref, reason: body.reason },
     });
-    res.json({ invoice: serializeInvoice(get('SELECT * FROM invoices WHERE id = ?', [row.id])) });
+    res.json({ invoice: await serializeInvoice(await get('SELECT * FROM invoices WHERE id = ?', [row.id])) });
   })
 );
 

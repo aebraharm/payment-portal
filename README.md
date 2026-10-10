@@ -135,8 +135,11 @@ See `.env.example` for the full annotated list. The important ones:
 | ----------------- | -------- | --------------------------------------------------- |
 | `PORT`            | no       | Server port (default 4000)                          |
 | `NODE_ENV`        | no       | `production` enables secure cookies                 |
-| `DATABASE_PATH`   | no       | SQLite file path                                    |
+| `DATABASE_PATH`   | no       | SQLite file path (VPS default)                      |
 | `UPLOAD_DIR`      | no       | Private upload directory (never statically served)  |
+| `TURSO_DATABASE_URL` / `TURSO_DATABASE_TOKEN` | hosted DB | libSQL/Turso database — enables `DB_DRIVER=libsql` |
+| `S3_BUCKET` / `S3_*` | object store | Private S3-compatible bucket — enables `STORAGE_DRIVER=s3` |
+| `RATE_LIMIT_STORE` | no      | `memory` (single process) or `db` (shared; required serverless) |
 | `ADMIN_EMAIL`     | yes      | Bootstrap admin email (seeded once)                 |
 | `ADMIN_PASSWORD`  | yes      | Bootstrap admin initial password (change on login)  |
 | `SMTP_*`          | no       | Email is optional; without it nothing is faked      |
@@ -167,20 +170,37 @@ npm test
 ```
 
 - **Backend** (`tests/backend/`): supertest against the real Express app with
-  an isolated in-memory database and temp upload dir. Covers authentication,
-  forced password change, client isolation, the full payment workflow,
-  idempotency, snapshots, settings validation, receipt security, and CSV
-  export.
+  an isolated database and temp upload dir. Covers authentication, forced
+  password change, client isolation, the full payment workflow, idempotency,
+  snapshots, settings validation, receipt security, and CSV export — plus the
+  serverless pieces: the whole API exercised through the Netlify handler
+  (cookies, CSP, binary receipt round-trip included), async transaction
+  atomicity and rollback, and rate-limit counters shared across app instances.
+- **Deploy** (`tests/deploy/`): parses `netlify.toml` and asserts the routing and
+  function packaging that only fail in production (`/api/*` before the SPA
+  fallback, migration files included, drivers declared as runtime deps).
 - **Frontend** (`tests/frontend/`): jsdom tests for the design system, money
   formatting, and the client login page (with a mocked API layer).
 
 ## Deployment
 
-See **[DEPLOYMENT.md](./DEPLOYMENT.md)** for a beginner-friendly, step-by-step
-VPS deployment guide (server setup, firewall, Node 22, nginx + Let's Encrypt,
-systemd supervision, health checks, backups **with restore testing**, logging,
-updates, and secure email configuration), plus the full environment-variable
-reference, security checklist, and a Netlify/serverless assessment.
+See **[DEPLOYMENT.md](./DEPLOYMENT.md)**. Two supported targets, one codebase,
+chosen by environment variables:
+
+- **Part A — VPS** (the default): step-by-step for a beginner (server setup,
+  firewall, Node 22, nginx + Let's Encrypt, systemd, health checks, backups
+  **with restore testing**, logging, updates, secure email). SQLite file +
+  private upload directory.
+- **Part D — Netlify (serverless)**: the same Express app behind a Netlify
+  Function, with a hosted **libSQL/Turso** database and a **private
+  S3-compatible bucket** for receipts. Covers services to create, every
+  variable, `npm run migrate` / `npm run seed` against the hosted database,
+  deploy + verification commands, and backups for both stores. The app refuses
+  to boot serverlessly with a config that would silently lose files or rate
+  limits, instead of pretending to work.
+
+Part B is the shared reference (environment variables, email, security
+checklist, scaling).
 
 ## License
 

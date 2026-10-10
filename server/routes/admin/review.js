@@ -11,8 +11,8 @@ import { formatMoney } from '../../lib/money.js';
 const router = Router();
 router.use(requireAdmin);
 
-function serializeConfirmation(row) {
-  const currency = getCurrency(row.currency);
+async function serializeConfirmation(row) {
+  const currency = await getCurrency(row.currency);
   return {
     id: row.id,
     paymentReferenceId: row.payment_reference_id,
@@ -51,7 +51,7 @@ const LIST_SQL = `
     JOIN clients c ON c.id = pc.client_id
     LEFT JOIN admins a ON a.id = pc.reviewer_id`;
 
-function listConfirmations({ q, status, method, currency, page, pageSize }) {
+async function listConfirmations({ q, status, method, currency, page, pageSize }) {
   const where = [];
   const params = [];
   if (q) {
@@ -72,15 +72,19 @@ function listConfirmations({ q, status, method, currency, page, pageSize }) {
     params.push(String(currency).toUpperCase());
   }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const total = get(`SELECT COUNT(*) AS n FROM payment_confirmations pc
+  const total = (await get(`SELECT COUNT(*) AS n FROM payment_confirmations pc
     JOIN payment_references pr ON pr.id = pc.payment_reference_id
     JOIN invoices i ON i.id = pc.invoice_id
-    JOIN clients c ON c.id = pc.client_id ${whereSql}`, params).n;
-  const rows = all(
+    JOIN clients c ON c.id = pc.client_id ${whereSql}`, params)).n;
+  const rows = await all(
     `${LIST_SQL} ${whereSql} ORDER BY pc.created_at DESC LIMIT ? OFFSET ?`,
     [...params, pageSize, (page - 1) * pageSize]
   );
-  return { total, confirmations: rows.map(serializeConfirmation) };
+  // serializeConfirmation is async (it resolves the currency for display), so
+  // the rows are mapped through it and awaited together — `rows.map(fn)` alone
+  // would produce an array of Promises.
+  const confirmations = await Promise.all(rows.map(serializeConfirmation));
+  return { total, confirmations };
 }
 
 router.get(
@@ -89,7 +93,7 @@ router.get(
     const page = Math.max(1, Number(req.query.page) || 1);
     const pageSize = Math.min(100, Number(req.query.pageSize) || 20);
     res.json({
-      ...listConfirmations({
+      ...await listConfirmations({
         q: req.query.q ? String(req.query.q).trim() : '',
         status: req.query.status ? String(req.query.status) : '',
         method: req.query.method ? String(req.query.method) : '',
@@ -106,21 +110,21 @@ router.get(
 router.get(
   '/transactions/:id',
   asyncHandler(async (req, res) => {
-    const row = get(`${LIST_SQL} WHERE pc.id = ?`, [req.params.id]);
+    const row = await get(`${LIST_SQL} WHERE pc.id = ?`, [req.params.id]);
     if (!row) throw notFound('Transaction not found.');
-    const invoice = get('SELECT * FROM invoices WHERE id = ?', [row.invoice_id]);
-    const reference = get('SELECT * FROM payment_references WHERE id = ?', [row.payment_reference_id]);
-    const receipts = all('SELECT * FROM receipts WHERE confirmation_id = ? ORDER BY uploaded_at', [row.id]);
-    const history = all(
+    const invoice = await get('SELECT * FROM invoices WHERE id = ?', [row.invoice_id]);
+    const reference = await get('SELECT * FROM payment_references WHERE id = ?', [row.payment_reference_id]);
+    const receipts = await all('SELECT * FROM receipts WHERE confirmation_id = ? ORDER BY uploaded_at', [row.id]);
+    const history = await all(
       'SELECT * FROM confirmation_status_history WHERE confirmation_id = ? ORDER BY created_at, id',
       [row.id]
     );
-    const notes = all(
+    const notes = await all(
       'SELECT an.*, a.email AS admin_email FROM admin_notes an LEFT JOIN admins a ON a.id = an.admin_id WHERE an.confirmation_id = ? ORDER BY an.created_at DESC',
       [row.id]
     );
     res.json({
-      confirmation: serializeConfirmation(row),
+      confirmation: await serializeConfirmation(row),
       invoice: invoice
         ? {
             id: invoice.id,
@@ -169,7 +173,7 @@ router.get(
 router.post(
   '/transactions/:id/review',
   asyncHandler(async (req, res) => {
-    const row = get(`${LIST_SQL} WHERE pc.id = ?`, [req.params.id]);
+    const row = await get(`${LIST_SQL} WHERE pc.id = ?`, [req.params.id]);
     if (!row) throw notFound('Transaction not found.');
     const schema = z.object({
       action: z.enum(['under_review', 'verified', 'rejected', 'info_requested']),
@@ -190,67 +194,67 @@ router.post(
       throw badRequest(`A reason is required when marking a submission as ${action === 'rejected' ? 'rejected' : 'information requested'}.`);
     }
 
-    tx(() => {
+    await tx(async () => {
       const now = isoNow();
       // Re-read inside the write transaction so the status check is atomic
       // with the update — two concurrent reviews cannot both apply.
-      const current = get('SELECT status FROM payment_confirmations WHERE id = ?', [row.id]);
+      const current = await get('SELECT status FROM payment_confirmations WHERE id = ?', [row.id]);
       if (!current || !['submitted', 'under_review', 'info_requested', 'rejected'].includes(current.status)) {
         throw badRequest(`Cannot review a transaction with status "${current ? current.status : 'unknown'}".`);
       }
       if (action === 'under_review') {
-        run(
+        await run(
           `UPDATE payment_confirmations SET status = 'under_review', reviewer_id = ?, reviewed_at = ?, updated_at = ? WHERE id = ?`,
           [req.admin.id, now, now, row.id]
         );
-        run(`UPDATE payment_references SET status = 'under_review', updated_at = ? WHERE id = ?`, [now, row.payment_reference_id]);
-        run(`UPDATE invoices SET status = 'under_review', updated_at = ? WHERE id = ?`, [now, row.invoice_id]);
-        run(
+        await run(`UPDATE payment_references SET status = 'under_review', updated_at = ? WHERE id = ?`, [now, row.payment_reference_id]);
+        await run(`UPDATE invoices SET status = 'under_review', updated_at = ? WHERE id = ?`, [now, row.invoice_id]);
+        await run(
           'INSERT INTO confirmation_status_history (confirmation_id, status, note, actor_type, actor_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
           [row.id, 'under_review', note || null, 'admin', req.admin.id, now]
         );
       } else if (action === 'verified') {
         // Only an authorized administrator may mark a manually reported
         // transfer as verified, and the reviewer + timestamp are recorded.
-        run(
+        await run(
           `UPDATE payment_confirmations SET status = 'verified', reviewer_id = ?, reviewed_at = ?, updated_at = ? WHERE id = ?`,
           [req.admin.id, now, now, row.id]
         );
-        run(`UPDATE payment_references SET status = 'verified', updated_at = ? WHERE id = ?`, [now, row.payment_reference_id]);
-        const invoice = get('SELECT * FROM invoices WHERE id = ?', [row.invoice_id]);
+        await run(`UPDATE payment_references SET status = 'verified', updated_at = ? WHERE id = ?`, [now, row.payment_reference_id]);
+        const invoice = await get('SELECT * FROM invoices WHERE id = ?', [row.invoice_id]);
         const newInvoiceStatus =
           row.amount_sent_cents >= invoice.amount_cents ? 'paid' : 'partially_paid';
-        run('UPDATE invoices SET status = ?, updated_at = ? WHERE id = ?', [newInvoiceStatus, now, invoice.id]);
-        run(
+        await run('UPDATE invoices SET status = ?, updated_at = ? WHERE id = ?', [newInvoiceStatus, now, invoice.id]);
+        await run(
           'INSERT INTO confirmation_status_history (confirmation_id, status, note, actor_type, actor_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
           [row.id, 'verified', note || null, 'admin', req.admin.id, now]
         );
       } else if (action === 'rejected') {
-        run(
+        await run(
           `UPDATE payment_confirmations SET status = 'rejected', rejection_reason = ?, reviewer_id = ?, reviewed_at = ?, updated_at = ? WHERE id = ?`,
           [reason.trim(), req.admin.id, now, now, row.id]
         );
-        run(`UPDATE payment_references SET status = 'rejected', updated_at = ? WHERE id = ?`, [now, row.payment_reference_id]);
-        run(`UPDATE invoices SET status = 'rejected', updated_at = ? WHERE id = ?`, [now, row.invoice_id]);
-        run(
+        await run(`UPDATE payment_references SET status = 'rejected', updated_at = ? WHERE id = ?`, [now, row.payment_reference_id]);
+        await run(`UPDATE invoices SET status = 'rejected', updated_at = ? WHERE id = ?`, [now, row.invoice_id]);
+        await run(
           'INSERT INTO confirmation_status_history (confirmation_id, status, note, actor_type, actor_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
           [row.id, 'rejected', reason.trim(), 'admin', req.admin.id, now]
         );
       } else {
         // info_requested
-        run(
+        await run(
           `UPDATE payment_confirmations SET status = 'info_requested', reviewer_id = ?, reviewed_at = ?, updated_at = ? WHERE id = ?`,
           [req.admin.id, now, now, row.id]
         );
-        run(`UPDATE payment_references SET status = 'info_requested', updated_at = ? WHERE id = ?`, [now, row.payment_reference_id]);
-        run(`UPDATE invoices SET status = 'awaiting_payment', updated_at = ? WHERE id = ?`, [now, row.invoice_id]);
-        run(
+        await run(`UPDATE payment_references SET status = 'info_requested', updated_at = ? WHERE id = ?`, [now, row.payment_reference_id]);
+        await run(`UPDATE invoices SET status = 'awaiting_payment', updated_at = ? WHERE id = ?`, [now, row.invoice_id]);
+        await run(
           'INSERT INTO confirmation_status_history (confirmation_id, status, note, actor_type, actor_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
           [row.id, 'info_requested', reason.trim(), 'admin', req.admin.id, now]
         );
       }
       if (note && note.trim()) {
-        run('INSERT INTO admin_notes (confirmation_id, note, admin_id, created_at) VALUES (?, ?, ?, ?)', [
+        await run('INSERT INTO admin_notes (confirmation_id, note, admin_id, created_at) VALUES (?, ?, ?, ?)', [
           row.id,
           note.trim(),
           req.admin.id,
@@ -259,7 +263,7 @@ router.post(
       }
     });
 
-    audit(req, {
+    await audit(req, {
       action: action === 'verified' ? 'payment_verified' : action === 'rejected' ? 'payment_rejected' : action === 'info_requested' ? 'payment_info_requested' : 'payment_under_review',
       entity: 'payment_confirmation',
       entityId: row.id,
@@ -267,7 +271,7 @@ router.post(
     });
 
     // Notify the client about outcomes (email only if SMTP is configured).
-    const client = get('SELECT * FROM clients WHERE id = ?', [row.client_id]);
+    const client = await get('SELECT * FROM clients WHERE id = ?', [row.client_id]);
     const vars = {
       client_name: client?.full_name,
       payment_ref: row.ref_code,
@@ -277,9 +281,9 @@ router.post(
       reason: reason || '',
     };
     if (client?.email) {
-      if (action === 'verified' && getSetting('notify_on_payment_approved')) {
+      if (action === 'verified' && await getSetting('notify_on_payment_approved')) {
         await notifyFromTemplate('payment_approved', { recipient: client.email, vars, fallbackSubject: `Payment verified — ${row.ref_code}`, fallbackBody: `Your payment of ${vars.amount} ${vars.currency} for invoice ${row.invoice_ref} has been verified.` });
-      } else if (action === 'rejected' && getSetting('notify_on_payment_rejected')) {
+      } else if (action === 'rejected' && await getSetting('notify_on_payment_rejected')) {
         await notifyFromTemplate('payment_rejected', { recipient: client.email, vars, fallbackSubject: `Payment submission needs attention — ${row.ref_code}`, fallbackBody: `Your payment submission for invoice ${row.invoice_ref} could not be verified. Reason: ${reason}.` });
       } else if (action === 'info_requested') {
         await notifyFromTemplate('info_requested', { recipient: client.email, vars, fallbackSubject: `Additional information required — ${row.ref_code}`, fallbackBody: `We need additional information for your payment submission ${row.ref_code}: ${reason}` });
@@ -293,7 +297,7 @@ router.post(
 router.post(
   '/transactions/:id/notes',
   asyncHandler(async (req, res) => {
-    const row = get('SELECT * FROM payment_confirmations WHERE id = ?', [req.params.id]);
+    const row = await get('SELECT * FROM payment_confirmations WHERE id = ?', [req.params.id]);
     if (!row) throw notFound('Transaction not found.');
     const schema = z.object({ note: z.string().min(1).max(4000) });
     let body;
@@ -302,13 +306,13 @@ router.post(
     } catch (e) {
       throw zodError(e);
     }
-    run('INSERT INTO admin_notes (confirmation_id, note, admin_id, created_at) VALUES (?, ?, ?, ?)', [
+    await run('INSERT INTO admin_notes (confirmation_id, note, admin_id, created_at) VALUES (?, ?, ?, ?)', [
       row.id,
       body.note.trim(),
       req.admin.id,
       isoNow(),
     ]);
-    audit(req, { action: 'transaction_note_added', entity: 'payment_confirmation', entityId: row.id });
+    await audit(req, { action: 'transaction_note_added', entity: 'payment_confirmation', entityId: row.id });
     res.status(201).json({ ok: true });
   })
 );

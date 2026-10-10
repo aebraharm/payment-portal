@@ -47,12 +47,12 @@ export function verifyPassword(password, hash) {
  * caller exactly once (it is set as an HttpOnly cookie); only its SHA-256 hash
  * is stored.
  */
-export function createSession({ actorType, actorId, ip, userAgent }) {
+export async function createSession({ actorType, actorId, ip, userAgent }) {
   const token = crypto.randomBytes(32).toString('hex');
   const expiresAt = new Date(
     Date.now() + config.sessionTtlHours * 60 * 60 * 1000
   ).toISOString();
-  run(
+  await run(
     `INSERT INTO sessions (token_hash, actor_type, actor_id, expires_at, ip, user_agent, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
     [hashToken(token), actorType, actorId, expiresAt, ip || null, userAgent || null, isoNow()]
@@ -60,9 +60,9 @@ export function createSession({ actorType, actorId, ip, userAgent }) {
   return { token, expiresAt };
 }
 
-export function findSession(token) {
+export async function findSession(token) {
   if (!token) return null;
-  const row = get(
+  const row = await get(
     `SELECT * FROM sessions WHERE token_hash = ? AND revoked_at IS NULL`,
     [hashToken(token)]
   );
@@ -71,17 +71,17 @@ export function findSession(token) {
   return row;
 }
 
-export function revokeSession(token) {
+export async function revokeSession(token) {
   if (!token) return;
-  run('UPDATE sessions SET revoked_at = ? WHERE token_hash = ?', [isoNow(), hashToken(token)]);
+  await run('UPDATE sessions SET revoked_at = ? WHERE token_hash = ?', [isoNow(), hashToken(token)]);
 }
 
-export function revokeSessionById(id) {
-  run('UPDATE sessions SET revoked_at = ? WHERE id = ?', [isoNow(), id]);
+export async function revokeSessionById(id) {
+  await run('UPDATE sessions SET revoked_at = ? WHERE id = ?', [isoNow(), id]);
 }
 
-export function revokeAllSessionsForActor(actorType, actorId) {
-  run(
+export async function revokeAllSessionsForActor(actorType, actorId) {
+  await run(
     'UPDATE sessions SET revoked_at = ? WHERE actor_type = ? AND actor_id = ? AND revoked_at IS NULL',
     [isoNow(), actorType, actorId]
   );

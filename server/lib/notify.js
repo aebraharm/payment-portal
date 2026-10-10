@@ -33,7 +33,7 @@ export async function notify({ type, recipient, subject, body, vars, channel = '
   const finalBody = vars ? renderTemplate(body, vars) : body;
   const target = recipient || adminEmail || config.notifyAdminEmail || null;
 
-  const inserted = run(
+  const inserted = await run(
     `INSERT INTO notifications (type, recipient, subject, body, status, channel, created_at)
      VALUES (?, ?, ?, ?, 'pending', ?, ?)`,
     [type, target, finalSubject, finalBody, channel, isoNow()]
@@ -41,13 +41,13 @@ export async function notify({ type, recipient, subject, body, vars, channel = '
   const id = inserted.lastInsertRowid;
 
   if (channel !== 'email') {
-    run("UPDATE notifications SET status = 'sent', sent_at = ? WHERE id = ?", [isoNow(), id]);
+    await run("UPDATE notifications SET status = 'sent', sent_at = ? WHERE id = ?", [isoNow(), id]);
     return { id, status: 'sent' };
   }
 
   const transport = getTransporter();
   if (!transport || !target) {
-    run("UPDATE notifications SET status = 'skipped_not_configured' WHERE id = ?", [id]);
+    await run("UPDATE notifications SET status = 'skipped_not_configured' WHERE id = ?", [id]);
     console.log(
       `[notify] ${type} -> ${target || '(no recipient)'}: email not configured, notification stored only (id=${id})`
     );
@@ -56,10 +56,10 @@ export async function notify({ type, recipient, subject, body, vars, channel = '
 
   try {
     await transport.sendMail({ from: config.smtp.from, to: target, subject: finalSubject, text: finalBody });
-    run("UPDATE notifications SET status = 'sent', sent_at = ? WHERE id = ?", [isoNow(), id]);
+    await run("UPDATE notifications SET status = 'sent', sent_at = ? WHERE id = ?", [isoNow(), id]);
     return { id, status: 'sent' };
   } catch (err) {
-    run("UPDATE notifications SET status = 'failed', error = ? WHERE id = ?", [
+    await run("UPDATE notifications SET status = 'failed', error = ? WHERE id = ?", [
       String(err.message || err).slice(0, 500),
       id,
     ]);
@@ -68,8 +68,8 @@ export async function notify({ type, recipient, subject, body, vars, channel = '
   }
 }
 
-export function getNotificationTemplates() {
-  const row = get('SELECT value FROM settings WHERE key = ?', ['notification_templates']);
+export async function getNotificationTemplates() {
+  const row = await get('SELECT value FROM settings WHERE key = ?', ['notification_templates']);
   if (!row) return {};
   try {
     return JSON.parse(row.value);
@@ -80,9 +80,9 @@ export function getNotificationTemplates() {
 
 /** Convenience helper: notify using an editable template from settings. */
 export async function notifyFromTemplate(type, { recipient, vars, fallbackSubject, fallbackBody }) {
-  const templates = getNotificationTemplates();
+  const templates = await getNotificationTemplates();
   const tpl = templates[type] || {};
-  return notify({
+  return await notify({
     type,
     recipient,
     subject: tpl.subject || fallbackSubject,

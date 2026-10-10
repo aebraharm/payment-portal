@@ -28,7 +28,7 @@ function clientProfile(row) {
   };
 }
 
-function listClients({ q, status, page, pageSize }) {
+async function listClients({ q, status, page, pageSize }) {
   const where = [];
   const params = [];
   if (q) {
@@ -41,8 +41,8 @@ function listClients({ q, status, page, pageSize }) {
     params.push(status);
   }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const total = get(`SELECT COUNT(*) AS n FROM clients c ${whereSql}`, params).n;
-  const rows = all(
+  const total = (await get(`SELECT COUNT(*) AS n FROM clients c ${whereSql}`, params)).n;
+  const rows = await all(
     `SELECT c.*,
        (SELECT COUNT(*) FROM invoices i WHERE i.client_id = c.id) AS invoice_count,
        (SELECT COUNT(*) FROM invoices i WHERE i.client_id = c.id AND i.status IN ('unpaid','awaiting_payment','confirmation_submitted','under_review','rejected')) AS open_invoice_count
@@ -58,7 +58,7 @@ router.get(
     const page = Math.max(1, Number(req.query.page) || 1);
     const pageSize = Math.min(100, Number(req.query.pageSize) || 20);
     res.json({
-      ...listClients({
+      ...await listClients({
         q: req.query.q ? String(req.query.q).trim() : '',
         status: req.query.status ? String(req.query.status) : '',
         page,
@@ -85,15 +85,15 @@ router.post(
     } catch (e) {
       throw zodError(e);
     }
-    const existing = get('SELECT id FROM clients WHERE full_name = ? COLLATE NOCASE', [body.fullName]);
+    const existing = await get('SELECT id FROM clients WHERE full_name = ? COLLATE NOCASE', [body.fullName]);
     if (existing) {
       throw badRequest('A client with this full name already exists. Client full names are the login identifier.');
     }
 
     const accessCode = generateAccessCode(8);
     const now = isoNow();
-    const clientCode = generateClientCode();
-    const inserted = run(
+    const clientCode = await generateClientCode();
+    const inserted = await run(
       `INSERT INTO clients (client_code, full_name, email, phone, status, access_code_hash, access_code_hint, notes, created_at, updated_at)
        VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`,
       [
@@ -108,8 +108,8 @@ router.post(
         now,
       ]
     );
-    const client = get('SELECT * FROM clients WHERE id = ?', [inserted.lastInsertRowid]);
-    audit(req, {
+    const client = await get('SELECT * FROM clients WHERE id = ?', [inserted.lastInsertRowid]);
+    await audit(req, {
       action: 'client_created',
       entity: 'client',
       entityId: client.id,
@@ -132,8 +132,8 @@ router.post(
   })
 );
 
-function getClientOr404(id) {
-  const client = get('SELECT * FROM clients WHERE id = ?', [id]);
+async function getClientOr404(id) {
+  const client = await get('SELECT * FROM clients WHERE id = ?', [id]);
   if (!client) throw notFound('Client not found.');
   return client;
 }
@@ -141,17 +141,16 @@ function getClientOr404(id) {
 router.get(
   '/clients/:id',
   asyncHandler(async (req, res) => {
-    const client = getClientOr404(req.params.id);
-    const invoices = all(
-      `SELECT * FROM invoices WHERE client_id = ? ORDER BY created_at DESC`,
-      [client.id]
-    ).map(serializeInvoice);
-    const confirmations = all(
+    const client = await getClientOr404(req.params.id);
+    const invoices = await Promise.all(
+      (await all(`SELECT * FROM invoices WHERE client_id = ? ORDER BY created_at DESC`, [client.id])).map(serializeInvoice)
+    );
+    const confirmations = (await all(
       `SELECT pc.*, pr.ref_code
          FROM payment_confirmations pc JOIN payment_references pr ON pr.id = pc.payment_reference_id
         WHERE pc.client_id = ? ORDER BY pc.created_at DESC LIMIT 50`,
       [client.id]
-    ).map((r) => ({
+    )).map((r) => ({
       id: r.id,
       paymentReferenceId: r.payment_reference_id,
       refCode: r.ref_code,
@@ -166,17 +165,17 @@ router.get(
       reviewedAt: r.reviewed_at,
       createdAt: r.created_at,
     }));
-    const notes = all(
+    const notes = await all(
       `SELECT an.*, a.email AS admin_email FROM admin_notes an LEFT JOIN admins a ON a.id = an.admin_id
         WHERE an.client_id = ? ORDER BY an.created_at DESC`,
       [client.id]
     );
-    const outstanding = all(
+    const outstanding = (await all(
       `SELECT currency, SUM(amount_cents) AS cents FROM invoices
         WHERE client_id = ? AND status IN ('unpaid','awaiting_payment','confirmation_submitted','under_review','rejected')
         GROUP BY currency`,
       [client.id]
-    ).map((r) => ({ currency: r.currency, amountCents: r.cents, amountFormatted: formatMoney(r.cents, r.currency) }));
+    )).map((r) => ({ currency: r.currency, amountCents: r.cents, amountFormatted: formatMoney(r.cents, r.currency) }));
     res.json({ client: clientProfile(client), invoices, confirmations, notes, outstanding });
   })
 );
@@ -184,7 +183,7 @@ router.get(
 router.put(
   '/clients/:id',
   asyncHandler(async (req, res) => {
-    const client = getClientOr404(req.params.id);
+    const client = await getClientOr404(req.params.id);
     const schema = z.object({
       fullName: z.string().min(2).transform((v) => v.trim()).optional(),
       email: z.string().email().transform((v) => v.trim().toLowerCase()).optional().or(z.literal('')).nullable(),
@@ -199,14 +198,14 @@ router.put(
       throw zodError(e);
     }
     if (body.fullName && body.fullName.toLowerCase() !== client.full_name.toLowerCase()) {
-      const dup = get('SELECT id FROM clients WHERE full_name = ? COLLATE NOCASE AND id != ?', [
+      const dup = await get('SELECT id FROM clients WHERE full_name = ? COLLATE NOCASE AND id != ?', [
         body.fullName,
         client.id,
       ]);
       if (dup) throw badRequest('A client with this full name already exists.');
     }
     const nextStatus = body.status || client.status;
-    run(
+    await run(
       `UPDATE clients SET full_name = ?, email = ?, phone = ?, status = ?, notes = ?, updated_at = ? WHERE id = ?`,
       [
         body.fullName ?? client.full_name,
@@ -219,18 +218,18 @@ router.put(
       ]
     );
     if (nextStatus === 'suspended' && client.status !== 'suspended') {
-      run(
+      await run(
         'UPDATE sessions SET revoked_at = ? WHERE actor_type = ? AND actor_id = ? AND revoked_at IS NULL',
         [isoNow(), 'client', client.id]
       );
     }
-    audit(req, {
+    await audit(req, {
       action: body.status && body.status !== client.status ? 'client_status_changed' : 'client_updated',
       entity: 'client',
       entityId: client.id,
       details: { status: nextStatus },
     });
-    res.json({ client: clientProfile(get('SELECT * FROM clients WHERE id = ?', [client.id])) });
+    res.json({ client: clientProfile(await get('SELECT * FROM clients WHERE id = ?', [client.id])) });
   })
 );
 
@@ -238,19 +237,19 @@ router.put(
 router.post(
   '/clients/:id/access-code/reset',
   asyncHandler(async (req, res) => {
-    const client = getClientOr404(req.params.id);
+    const client = await getClientOr404(req.params.id);
     const accessCode = generateAccessCode(8);
-    run('UPDATE clients SET access_code_hash = ?, access_code_hint = ?, updated_at = ? WHERE id = ?', [
+    await run('UPDATE clients SET access_code_hash = ?, access_code_hint = ?, updated_at = ? WHERE id = ?', [
       hashAccessCode(accessCode),
       accessCode.slice(-2),
       isoNow(),
       client.id,
     ]);
-    run(
+    await run(
       'UPDATE sessions SET revoked_at = ? WHERE actor_type = ? AND actor_id = ? AND revoked_at IS NULL',
       [isoNow(), 'client', client.id]
     );
-    audit(req, { action: 'client_access_code_reset', entity: 'client', entityId: client.id });
+    await audit(req, { action: 'client_access_code_reset', entity: 'client', entityId: client.id });
     res.json({ clientId: client.id, accessCode, accessCodeHint: accessCode.slice(-2) });
   })
 );
@@ -258,7 +257,7 @@ router.post(
 router.post(
   '/clients/:id/notes',
   asyncHandler(async (req, res) => {
-    const client = getClientOr404(req.params.id);
+    const client = await getClientOr404(req.params.id);
     const schema = z.object({ note: z.string().min(1, 'Note is required.').max(4000) });
     let body;
     try {
@@ -266,13 +265,13 @@ router.post(
     } catch (e) {
       throw zodError(e);
     }
-    run('INSERT INTO admin_notes (client_id, note, admin_id, created_at) VALUES (?, ?, ?, ?)', [
+    await run('INSERT INTO admin_notes (client_id, note, admin_id, created_at) VALUES (?, ?, ?, ?)', [
       client.id,
       body.note,
       req.admin.id,
       isoNow(),
     ]);
-    audit(req, { action: 'client_note_added', entity: 'client', entityId: client.id });
+    await audit(req, { action: 'client_note_added', entity: 'client', entityId: client.id });
     res.status(201).json({ ok: true });
   })
 );
@@ -280,8 +279,8 @@ router.post(
 router.get(
   '/clients/:id/transactions',
   asyncHandler(async (req, res) => {
-    const client = getClientOr404(req.params.id);
-    const rows = all(
+    const client = await getClientOr404(req.params.id);
+    const rows = await all(
       `SELECT pr.ref_code, pr.method, pr.currency, pr.amount_cents, pr.status AS reference_status,
               pr.created_at AS reference_created_at,
               pc.id AS confirmation_id, pc.status AS confirmation_status, pc.amount_sent_cents,
@@ -298,8 +297,8 @@ router.get(
   })
 );
 
-function serializeInvoice(row) {
-  const currency = getCurrency(row.currency);
+async function serializeInvoice(row) {
+  const currency = await getCurrency(row.currency);
   return {
     id: row.id,
     invoiceRef: row.invoice_ref,

@@ -1,9 +1,8 @@
 import { Router } from 'express';
-import fs from 'node:fs';
 import path from 'node:path';
 import { asyncHandler } from '../lib/http.js';
 import { getPublicBranding, getEnabledCurrencies, getEnabledPaymentMethods, getSetting } from '../lib/settings.js';
-import { config } from '../config.js';
+import { storedFileExists, streamStoredFile } from '../lib/storage.js';
 
 const router = Router();
 
@@ -15,9 +14,9 @@ router.get('/health', (_req, res) => {
 router.get(
   '/public/branding',
   asyncHandler(async (_req, res) => {
-    const branding = getPublicBranding();
-    const currencies = getEnabledCurrencies();
-    const methods = getEnabledPaymentMethods();
+    const branding = await getPublicBranding();
+    const currencies = await getEnabledCurrencies();
+    const methods = await getEnabledPaymentMethods();
     const cardConfig = methods.find((m) => m.code === 'card');
     res.json({
       branding,
@@ -33,8 +32,8 @@ router.get(
           : {}),
       })),
       cardLabel: 'Not available in your region',
-      receiptMaxSizeMb: Number(getSetting('receipt_max_size_mb')) || 10,
-      allowedReceiptTypes: getSetting('allowed_receipt_types') || ['pdf', 'jpg', 'jpeg', 'png'],
+      receiptMaxSizeMb: Number(await getSetting('receipt_max_size_mb')) || 10,
+      allowedReceiptTypes: await getSetting('allowed_receipt_types') || ['pdf', 'jpg', 'jpeg', 'png'],
     });
   })
 );
@@ -43,22 +42,20 @@ router.get(
 router.get(
   '/public/branding/logo',
   asyncHandler(async (_req, res) => {
-    const logoPath = getSetting('logo_path');
+    const logoPath = await getSetting('logo_path');
     if (!logoPath) {
       res.status(404).json({ error: { code: 'not_found', message: 'No logo configured.' } });
       return;
     }
-    const resolved = path.resolve(config.uploadDir, logoPath);
-    const root = path.resolve(config.uploadDir);
-    if (!resolved.startsWith(root + path.sep) || !fs.existsSync(resolved)) {
+    if (!(await storedFileExists(logoPath))) {
       res.status(404).json({ error: { code: 'not_found', message: 'No logo configured.' } });
       return;
     }
-    const ext = path.extname(resolved).toLowerCase();
+    const ext = path.extname(logoPath).toLowerCase();
     const mime = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' }[ext] || 'application/octet-stream';
     res.setHeader('Content-Type', mime);
     res.setHeader('Cache-Control', 'public, max-age=300');
-    fs.createReadStream(resolved).pipe(res);
+    await streamStoredFile(logoPath, res);
   })
 );
 

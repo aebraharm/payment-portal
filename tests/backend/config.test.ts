@@ -13,13 +13,13 @@ describe('configuration, branding and seeding', () => {
   });
 
   it('seeding is idempotent (re-running does not duplicate or reset)', async () => {
-    const before = get('SELECT COUNT(*) AS n FROM admins').n;
+    const before = (await get('SELECT COUNT(*) AS n FROM admins')).n;
     await seedDatabase();
     await seedDatabase();
-    const after = get('SELECT COUNT(*) AS n FROM admins').n;
+    const after = (await get('SELECT COUNT(*) AS n FROM admins')).n;
     expect(after).toBe(before);
     // Bootstrap admin still has a valid password hash (not reset by re-seed).
-    const row = get('SELECT must_change_password, password_hash FROM admins WHERE email = ?', ['test-bootstrap-admin@example.com']);
+    const row = await get('SELECT must_change_password, password_hash FROM admins WHERE email = ?', ['test-bootstrap-admin@example.com']);
     expect(row.password_hash).toBeTruthy();
   });
 
@@ -72,12 +72,12 @@ describe('configuration, branding and seeding', () => {
   });
 
   it('previews settings without persisting them', async () => {
-    const before = get("SELECT value FROM settings WHERE key = 'agency_name'").value;
+    const before = (await get("SELECT value FROM settings WHERE key = 'agency_name'")).value;
     const preview = await admin.post('/api/admin/settings/preview').send({ agency_name: 'Preview Only Agency' });
     expect(preview.status).toBe(200);
     expect(preview.body.persisted).toBe(false);
     expect(preview.body.preview.agencyName).toBe('Preview Only Agency');
-    const after = get("SELECT value FROM settings WHERE key = 'agency_name'").value;
+    const after = (await get("SELECT value FROM settings WHERE key = 'agency_name'")).value;
     expect(after).toBe(before);
   });
 
@@ -130,7 +130,7 @@ describe('configuration, branding and seeding', () => {
   it('edits editable invoices and records audit events', async () => {
     const client = await createClient(admin, 'Invoice Client 3', 'invoice3@example.com');
     const invoice = await createInvoice(admin, client.id, { description: 'Editable' });
-    const before = get('SELECT COUNT(*) AS n FROM audit_logs').n;
+    const before = (await get('SELECT COUNT(*) AS n FROM audit_logs')).n;
 
     const edit = await admin.put(`/api/admin/invoices/${invoice.id}`).send({
       description: 'Edited description',
@@ -144,9 +144,9 @@ describe('configuration, branding and seeding', () => {
     // Amounts are immutable after issue — the server ignores amount edits.
     expect(edit.body.invoice.amountCents).toBe(150000);
 
-    const after = get('SELECT COUNT(*) AS n FROM audit_logs').n;
+    const after = (await get('SELECT COUNT(*) AS n FROM audit_logs')).n;
     expect(after).toBeGreaterThan(before);
-    const events = get('SELECT action FROM audit_logs ORDER BY id DESC LIMIT 1');
+    const events = await get('SELECT action FROM audit_logs ORDER BY id DESC LIMIT 1');
     expect(events.action).toBe('invoice_updated');
   });
 
@@ -156,7 +156,7 @@ describe('configuration, branding and seeding', () => {
     const res = await admin.post(`/api/admin/invoices/${invoice.id}/cancel`).send({ reason: 'Client withdrew application' });
     expect(res.status).toBe(200);
     expect(res.body.invoice.status).toBe('cancelled');
-    const row = get('SELECT status FROM invoices WHERE id = ?', [invoice.id]);
+    const row = await get('SELECT status FROM invoices WHERE id = ?', [invoice.id]);
     expect(row.status).toBe('cancelled');
   });
 

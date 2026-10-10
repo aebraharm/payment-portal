@@ -46,9 +46,9 @@ router.post(
       throw zodError(e);
     }
 
-    const admin = get('SELECT * FROM admins WHERE email = ?', [body.email]);
+    const admin = await get('SELECT * FROM admins WHERE email = ?', [body.email]);
     if (!admin || !verifyPassword(body.password, admin.password_hash)) {
-      audit(req, {
+      await audit(req, {
         actor: { type: 'system', id: null },
         action: 'admin_login_failed',
         entity: 'admin',
@@ -61,15 +61,15 @@ router.post(
       throw forbidden('This administrator account is disabled.');
     }
 
-    run('UPDATE admins SET last_login_at = ?, updated_at = ? WHERE id = ?', [isoNow(), isoNow(), admin.id]);
-    const session = createSession({
+    await run('UPDATE admins SET last_login_at = ?, updated_at = ? WHERE id = ?', [isoNow(), isoNow(), admin.id]);
+    const session = await createSession({
       actorType: 'admin',
       actorId: admin.id,
       ip: clientIp(req),
       userAgent: req.headers['user-agent'],
     });
     setSessionCookie(res, ADMIN_COOKIE, session.token, session.expiresAt);
-    audit(req, {
+    await audit(req, {
       actor: { type: 'admin', id: admin.id },
       action: 'admin_login',
       entity: 'admin',
@@ -92,10 +92,10 @@ router.post(
   '/admin/auth/logout',
   asyncHandler(async (req, res) => {
     const token = req.cookies?.[ADMIN_COOKIE];
-    revokeSession(token);
+    await revokeSession(token);
     clearSessionCookie(res, ADMIN_COOKIE);
     if (req.admin) {
-      audit(req, { action: 'admin_logout', entity: 'admin', entityId: req.admin.id });
+      await audit(req, { action: 'admin_logout', entity: 'admin', entityId: req.admin.id });
     }
     res.json({ ok: true });
   })
@@ -126,22 +126,22 @@ router.post(
     if (body.currentPassword === body.newPassword) {
       throw badRequest('The new password must be different from the current password.');
     }
-    const row = get('SELECT * FROM admins WHERE id = ?', [req.admin.id]);
+    const row = await get('SELECT * FROM admins WHERE id = ?', [req.admin.id]);
     if (!row || !verifyPassword(body.currentPassword, row.password_hash)) {
-      audit(req, { action: 'admin_password_change_failed', entity: 'admin', entityId: req.admin.id });
+      await audit(req, { action: 'admin_password_change_failed', entity: 'admin', entityId: req.admin.id });
       throw unauthorized('Current password is incorrect.');
     }
-    run('UPDATE admins SET password_hash = ?, must_change_password = 0, updated_at = ? WHERE id = ?', [
+    await run('UPDATE admins SET password_hash = ?, must_change_password = 0, updated_at = ? WHERE id = ?', [
       hashPassword(body.newPassword),
       isoNow(),
       req.admin.id,
     ]);
     // Invalidate other sessions for this admin; keep the current one.
-    run(
+    await run(
       'UPDATE sessions SET revoked_at = ? WHERE actor_type = ? AND actor_id = ? AND revoked_at IS NULL AND token_hash != ?',
       [isoNow(), 'admin', req.admin.id, req.adminSession.token_hash]
     );
-    audit(req, { action: 'admin_password_changed', entity: 'admin', entityId: req.admin.id });
+    await audit(req, { action: 'admin_password_changed', entity: 'admin', entityId: req.admin.id });
     res.json({ ok: true, mustChangePassword: false });
   })
 );
@@ -163,10 +163,10 @@ router.post(
       throw zodError(e);
     }
 
-    const client = get('SELECT * FROM clients WHERE full_name = ? COLLATE NOCASE', [body.fullName]);
+    const client = await get('SELECT * FROM clients WHERE full_name = ? COLLATE NOCASE', [body.fullName]);
     // Deliberately generic message: do not reveal whether the name exists.
     if (!client || !verifyAccessCode(body.accessCode, client.access_code_hash)) {
-      audit(req, {
+      await audit(req, {
         actor: { type: 'system', id: null },
         action: 'client_login_failed',
         entity: 'client',
@@ -179,14 +179,14 @@ router.post(
       throw forbidden('Your account has been suspended. Please contact support.');
     }
 
-    const session = createSession({
+    const session = await createSession({
       actorType: 'client',
       actorId: client.id,
       ip: clientIp(req),
       userAgent: req.headers['user-agent'],
     });
     setSessionCookie(res, CLIENT_COOKIE, session.token, session.expiresAt);
-    audit(req, { action: 'client_login', entity: 'client', entityId: client.id });
+    await audit(req, { action: 'client_login', entity: 'client', entityId: client.id });
 
     res.json({
       client: {
@@ -203,7 +203,7 @@ router.post(
 router.post(
   '/client/auth/logout',
   asyncHandler(async (req, res) => {
-    revokeSession(req.cookies?.[CLIENT_COOKIE]);
+    await revokeSession(req.cookies?.[CLIENT_COOKIE]);
     clearSessionCookie(res, CLIENT_COOKIE);
     res.json({ ok: true });
   })
@@ -213,7 +213,7 @@ router.get(
   '/client/auth/me',
   requireClient,
   asyncHandler(async (req, res) => {
-    const row = get('SELECT * FROM clients WHERE id = ?', [req.portalClient.id]);
+    const row = await get('SELECT * FROM clients WHERE id = ?', [req.portalClient.id]);
     res.json({
       client: {
         id: row.id,
@@ -246,12 +246,12 @@ router.post(
     } catch (e) {
       throw zodError(e);
     }
-    const client = get('SELECT * FROM clients WHERE full_name = ? COLLATE NOCASE AND email = ? COLLATE NOCASE', [
+    const client = await get('SELECT * FROM clients WHERE full_name = ? COLLATE NOCASE AND email = ? COLLATE NOCASE', [
       body.fullName,
       body.email,
     ]);
     if (client) {
-      audit(req, { action: 'client_access_reset_requested', entity: 'client', entityId: client.id });
+      await audit(req, { action: 'client_access_reset_requested', entity: 'client', entityId: client.id });
       await notifyFromTemplate('access_reset_requested', {
         vars: {
           client_name: client.full_name,
