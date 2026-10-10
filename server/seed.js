@@ -35,13 +35,13 @@ const DEFAULT_METHODS = [
  *    vars exactly once; an existing administrator's password is NEVER reset.
  */
 export async function seedDatabase() {
-  migrate();
+  await migrate();
   const now = isoNow();
 
   for (const c of DEFAULT_CURRENCIES) {
-    const existing = get('SELECT code FROM currencies WHERE code = ?', [c.code]);
+    const existing = await get('SELECT code FROM currencies WHERE code = ?', [c.code]);
     if (!existing) {
-      run('INSERT INTO currencies (code, name, symbol, enabled, sort_order) VALUES (?, ?, ?, 1, ?)', [
+      await run('INSERT INTO currencies (code, name, symbol, enabled, sort_order) VALUES (?, ?, ?, 1, ?)', [
         c.code,
         c.name,
         c.symbol,
@@ -51,9 +51,9 @@ export async function seedDatabase() {
   }
 
   for (const m of DEFAULT_METHODS) {
-    const existing = get('SELECT code FROM payment_methods WHERE code = ?', [m.code]);
+    const existing = await get('SELECT code FROM payment_methods WHERE code = ?', [m.code]);
     if (!existing) {
-      run(
+      await run(
         'INSERT INTO payment_methods (code, name, enabled, sort_order, config, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
         [m.code, m.name, m.enabled, m.sort_order, JSON.stringify(m.config), now]
       );
@@ -61,15 +61,15 @@ export async function seedDatabase() {
   }
 
   for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
-    const existing = get('SELECT key FROM settings WHERE key = ?', [key]);
+    const existing = await get('SELECT key FROM settings WHERE key = ?', [key]);
     if (!existing) {
-      run('INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)', [key, JSON.stringify(value), now]);
+      await run('INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)', [key, JSON.stringify(value), now]);
     }
   }
 
-  const wu = get('SELECT id FROM western_union_config WHERE id = 1');
+  const wu = await get('SELECT id FROM western_union_config WHERE id = 1');
   if (!wu) {
-    run(
+    await run(
       `INSERT INTO western_union_config (id, display_name, currencies, countries, required_sender_info, required_recipient_info, mtcn_required, receipt_required, enabled, updated_at)
        VALUES (1, 'Western Union', '[]', '[]', '[]', '[]', 1, 1, 0, ?)`,
       [now]
@@ -93,9 +93,9 @@ export async function seedDatabase() {
         'credentials to source control) and run `npm run seed` again.'
     );
   } else {
-    const existingAdmin = get('SELECT id FROM admins WHERE email = ?', [adminEmail]);
+    const existingAdmin = await get('SELECT id FROM admins WHERE email = ?', [adminEmail]);
     if (!existingAdmin) {
-      run(
+      await run(
         `INSERT INTO admins (email, password_hash, role, full_name, status, must_change_password, created_at, updated_at)
          VALUES (?, ?, 'superadmin', 'Portal Administrator', 'active', 1, ?, ?)`,
         [adminEmail, hashPassword(adminPassword), now, now]
@@ -107,10 +107,10 @@ export async function seedDatabase() {
   }
 
   const counts = {
-    admins: get('SELECT COUNT(*) AS n FROM admins').n,
-    clients: get('SELECT COUNT(*) AS n FROM clients').n,
-    currencies: get('SELECT COUNT(*) AS n FROM currencies').n,
-    paymentMethods: get('SELECT COUNT(*) AS n FROM payment_methods').n,
+    admins: (await get('SELECT COUNT(*) AS n FROM admins')).n,
+    clients: (await get('SELECT COUNT(*) AS n FROM clients')).n,
+    currencies: (await get('SELECT COUNT(*) AS n FROM currencies')).n,
+    paymentMethods: (await get('SELECT COUNT(*) AS n FROM payment_methods')).n,
   };
   return counts;
 }

@@ -64,9 +64,10 @@ server/
   app.js / index.js       Express app factory + dev/prod entrypoint
   middleware/             auth, security (rate limits, CSP), error handling
   lib/                    money, refs, tokens, audit, notify, storage, settings,
-                          paymentConfig, instructions (snapshots)
+                          paymentConfig, instructions (snapshots), spa (fallback)
   routes/                 public, auth, files, admin/*, client/portal
 src/
+  App.tsx / routes.tsx    providers + the single client-side route table
   api/client.ts           typed API wrapper (JSON + multipart, ApiError)
   context/                Branding, ClientAuth, AdminAuth providers
   components/ui/          design system (buttons, badges, charts, modals, ...)
@@ -77,6 +78,8 @@ src/
 tests/
   backend/                supertest API suites (auth, payments, config, uploads)
   frontend/               jsdom component/page tests
+  deploy/                 netlify.toml / SPA routing config checks
+netlify.toml              Netlify build, SPA fallback, security headers
 ```
 
 ## Getting started
@@ -98,12 +101,18 @@ npm run dev
 ```
 
 Open http://localhost:4000 — the **client portal** is at `/`, the **admin
-portal** at `/admin/login`.
+portal** at `/admin/login` (also linked from the bottom of the client sign-in
+page, since staff need a way in from the page they already have bookmarked).
 
+- Both portals are routes of **one** SPA on **one** origin, so `/admin/login`
+  must resolve to `index.html` on a direct visit or a refresh. `netlify.toml`
+  provides that on Netlify and `server/lib/spa.js` provides it on the VPS;
+  `/api/*` is always matched first so a missing endpoint stays a JSON 404.
 - Bootstrap admin: the `ADMIN_EMAIL` / `ADMIN_PASSWORD` from `.env`.
   The first login forces a password change.
 - To create a client: sign in to the admin portal → Clients → New client.
   The access code is shown **once** — copy it to the client.
+
 
 ## Scripts
 
@@ -113,7 +122,7 @@ portal** at `/admin/login`.
 | `npm run build`      | Type-check + production frontend build to `dist/`    |
 | `npm start`          | Production server: serves `dist/` + API (SPA fallback) |
 | `npm run typecheck`  | `tsc` type-check                                     |
-| `npm test`           | Full test suite (75 tests: API + UI)                 |
+| `npm test`           | Full test suite (96 tests: API + UI + deploy config)  |
 | `npm run lint`       | ESLint                                               |
 | `npm run migrate`    | Apply database migrations                            |
 | `npm run seed`       | Idempotent seed (currencies, methods, settings, admin) |
@@ -126,8 +135,11 @@ See `.env.example` for the full annotated list. The important ones:
 | ----------------- | -------- | --------------------------------------------------- |
 | `PORT`            | no       | Server port (default 4000)                          |
 | `NODE_ENV`        | no       | `production` enables secure cookies                 |
-| `DATABASE_PATH`   | no       | SQLite file path                                    |
+| `DATABASE_PATH`   | no       | SQLite file path (VPS default)                      |
 | `UPLOAD_DIR`      | no       | Private upload directory (never statically served)  |
+| `TURSO_DATABASE_URL` / `TURSO_DATABASE_TOKEN` | hosted DB | libSQL/Turso database — enables `DB_DRIVER=libsql` |
+| `S3_BUCKET` / `S3_*` | object store | Private S3-compatible bucket — enables `STORAGE_DRIVER=s3` |
+| `RATE_LIMIT_STORE` | no      | `memory` (single process) or `db` (shared; required serverless) |
 | `ADMIN_EMAIL`     | yes      | Bootstrap admin email (seeded once)                 |
 | `ADMIN_PASSWORD`  | yes      | Bootstrap admin initial password (change on login)  |
 | `SMTP_*`          | no       | Email is optional; without it nothing is faked      |
@@ -158,20 +170,37 @@ npm test
 ```
 
 - **Backend** (`tests/backend/`): supertest against the real Express app with
-  an isolated in-memory database and temp upload dir. Covers authentication,
-  forced password change, client isolation, the full payment workflow,
-  idempotency, snapshots, settings validation, receipt security, and CSV
-  export.
+  an isolated database and temp upload dir. Covers authentication, forced
+  password change, client isolation, the full payment workflow, idempotency,
+  snapshots, settings validation, receipt security, and CSV export — plus the
+  serverless pieces: the whole API exercised through the Netlify handler
+  (cookies, CSP, binary receipt round-trip included), async transaction
+  atomicity and rollback, and rate-limit counters shared across app instances.
+- **Deploy** (`tests/deploy/`): parses `netlify.toml` and asserts the routing and
+  function packaging that only fail in production (`/api/*` before the SPA
+  fallback, migration files included, drivers declared as runtime deps).
 - **Frontend** (`tests/frontend/`): jsdom tests for the design system, money
   formatting, and the client login page (with a mocked API layer).
 
 ## Deployment
 
-See **[DEPLOYMENT.md](./DEPLOYMENT.md)** for a beginner-friendly, step-by-step
-VPS deployment guide (server setup, firewall, Node 22, nginx + Let's Encrypt,
-systemd supervision, health checks, backups **with restore testing**, logging,
-updates, and secure email configuration), plus the full environment-variable
-reference, security checklist, and a Netlify/serverless assessment.
+See **[DEPLOYMENT.md](./DEPLOYMENT.md)**. Two supported targets, one codebase,
+chosen by environment variables:
+
+- **Part A — VPS** (the default): step-by-step for a beginner (server setup,
+  firewall, Node 22, nginx + Let's Encrypt, systemd, health checks, backups
+  **with restore testing**, logging, updates, secure email). SQLite file +
+  private upload directory.
+- **Part D — Netlify (serverless)**: the same Express app behind a Netlify
+  Function, with a hosted **libSQL/Turso** database and a **private
+  S3-compatible bucket** for receipts. Covers services to create, every
+  variable, `npm run migrate` / `npm run seed` against the hosted database,
+  deploy + verification commands, and backups for both stores. The app refuses
+  to boot serverlessly with a config that would silently lose files or rate
+  limits, instead of pretending to work.
+
+Part B is the shared reference (environment variables, email, security
+checklist, scaling).
 
 ## License
 

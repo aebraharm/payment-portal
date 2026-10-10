@@ -38,7 +38,7 @@ router.get(
 router.get(
   '/currencies',
   asyncHandler(async (_req, res) => {
-    const rows = all('SELECT * FROM currencies ORDER BY sort_order, code');
+    const rows = await all('SELECT * FROM currencies ORDER BY sort_order, code');
     res.json({
       currencies: rows.map((r) => ({ ...r, enabled: !!r.enabled })),
     });
@@ -67,13 +67,13 @@ router.put(
       throw zodError(e);
     }
     for (const c of body.currencies) {
-      run(
+      await run(
         `INSERT INTO currencies (code, name, symbol, enabled, sort_order) VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(code) DO UPDATE SET name = excluded.name, symbol = excluded.symbol, enabled = excluded.enabled, sort_order = excluded.sort_order`,
         [c.code, c.name.trim(), c.symbol.trim(), c.enabled ? 1 : 0, c.sortOrder]
       );
     }
-    audit(req, { action: 'currencies_updated', entity: 'currencies', details: { count: body.currencies.length } });
+    await audit(req, { action: 'currencies_updated', entity: 'currencies', details: { count: body.currencies.length } });
     res.json({ ok: true });
   })
 );
@@ -83,7 +83,7 @@ router.put(
 router.get(
   '/payment-methods',
   asyncHandler(async (_req, res) => {
-    const rows = all('SELECT * FROM payment_methods ORDER BY sort_order, code');
+    const rows = await all('SELECT * FROM payment_methods ORDER BY sort_order, code');
     res.json({
       methods: rows.map((r) => ({ ...r, enabled: !!r.enabled, config: parseJson(r.config, {}) })),
     });
@@ -111,14 +111,14 @@ router.put(
       throw zodError(e);
     }
     for (const m of body.methods) {
-      const existing = get('SELECT * FROM payment_methods WHERE code = ?', [m.code]);
+      const existing = await get('SELECT * FROM payment_methods WHERE code = ?', [m.code]);
       if (!existing) throw notFound(`Unknown payment method "${m.code}".`);
       const config = parseJson(existing.config, {});
-      run(
+      await run(
         'UPDATE payment_methods SET name = ?, enabled = ?, sort_order = ?, config = ?, updated_at = ? WHERE code = ?',
         [m.name?.trim() || existing.name, m.enabled ? 1 : 0, m.sortOrder, JSON.stringify(config), isoNow(), m.code]
       );
-      audit(req, {
+      await audit(req, {
         action: m.enabled ? 'payment_method_enabled' : 'payment_method_disabled',
         entity: 'payment_method',
         entityId: m.code,
@@ -153,7 +153,7 @@ router.put(
     if (body.enabled && !body.regionVerified) {
       throw badRequest('Enabling card payments requires regional eligibility to be verified.');
     }
-    const row = get('SELECT * FROM payment_methods WHERE code = ?', ['card']);
+    const row = await get('SELECT * FROM payment_methods WHERE code = ?', ['card']);
     if (!row) throw notFound('Card payment method is not registered.');
     const config = {
       label: CARD_LABEL,
@@ -164,13 +164,13 @@ router.put(
       // provider integration (hosted checkout), never from this form.
       processorIntegrated: false,
     };
-    run('UPDATE payment_methods SET enabled = ?, config = ?, updated_at = ? WHERE code = ?', [
+    await run('UPDATE payment_methods SET enabled = ?, config = ?, updated_at = ? WHERE code = ?', [
       body.enabled ? 1 : 0,
       JSON.stringify(config),
       isoNow(),
       'card',
     ]);
-    audit(req, {
+    await audit(req, {
       action: 'card_config_updated',
       entity: 'payment_method',
       entityId: 'card',
@@ -205,8 +205,8 @@ const profileSchema = z.object({
   sortOrder: z.number().int().min(0).max(10000).optional().default(0),
 });
 
-function validateProfile(body) {
-  const currency = get('SELECT * FROM currencies WHERE code = ?', [body.currency]);
+async function validateProfile(body) {
+  const currency = await get('SELECT * FROM currencies WHERE code = ?', [body.currency]);
   if (!currency) throw badRequest(`Unknown currency "${body.currency}".`);
   const allowedTypes = (TRANSFER_TYPES[body.currency] || []).map((t) => t.value);
   const invalid = body.transferTypes.filter((t) => !allowedTypes.includes(t));
@@ -228,8 +228,8 @@ router.get(
   asyncHandler(async (req, res) => {
     const currency = req.query.currency ? String(req.query.currency).toUpperCase() : null;
     const rows = currency
-      ? all('SELECT * FROM bank_instructions WHERE currency = ? ORDER BY sort_order, id', [currency])
-      : all('SELECT * FROM bank_instructions ORDER BY currency, sort_order, id');
+      ? await all('SELECT * FROM bank_instructions WHERE currency = ? ORDER BY sort_order, id', [currency])
+      : await all('SELECT * FROM bank_instructions ORDER BY currency, sort_order, id');
     res.json({ profiles: rows.map(serializeProfile) });
   })
 );
@@ -244,9 +244,9 @@ router.post(
     } catch (e) {
       throw zodError(e);
     }
-    validateProfile(body);
+    await validateProfile(body);
     const now = isoNow();
-    const inserted = run(
+    const inserted = await run(
       `INSERT INTO bank_instructions (currency, profile_name, transfer_types, fields, enabled, sort_order, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
@@ -260,13 +260,13 @@ router.post(
         now,
       ]
     );
-    audit(req, {
+    await audit(req, {
       action: 'bank_instructions_created',
       entity: 'bank_instructions',
       entityId: inserted.lastInsertRowid,
       details: { currency: body.currency, profileName: body.profileName },
     });
-    res.status(201).json({ profile: serializeProfile(get('SELECT * FROM bank_instructions WHERE id = ?', [inserted.lastInsertRowid])) });
+    res.status(201).json({ profile: serializeProfile(await get('SELECT * FROM bank_instructions WHERE id = ?', [inserted.lastInsertRowid])) });
   })
 );
 
@@ -274,7 +274,7 @@ router.put(
   '/bank-instructions/:id',
   requireConfigRole,
   asyncHandler(async (req, res) => {
-    const row = get('SELECT * FROM bank_instructions WHERE id = ?', [req.params.id]);
+    const row = await get('SELECT * FROM bank_instructions WHERE id = ?', [req.params.id]);
     if (!row) throw notFound('Bank instruction profile not found.');
     let body;
     try {
@@ -282,8 +282,8 @@ router.put(
     } catch (e) {
       throw zodError(e);
     }
-    validateProfile(body);
-    run(
+    await validateProfile(body);
+    await run(
       `UPDATE bank_instructions SET profile_name = ?, transfer_types = ?, fields = ?, enabled = ?, sort_order = ?, updated_at = ? WHERE id = ?`,
       [
         body.profileName.trim(),
@@ -295,13 +295,13 @@ router.put(
         row.id,
       ]
     );
-    audit(req, {
+    await audit(req, {
       action: 'bank_instructions_updated',
       entity: 'bank_instructions',
       entityId: row.id,
       details: { currency: body.currency, profileName: body.profileName },
     });
-    res.json({ profile: serializeProfile(get('SELECT * FROM bank_instructions WHERE id = ?', [row.id])) });
+    res.json({ profile: serializeProfile(await get('SELECT * FROM bank_instructions WHERE id = ?', [row.id])) });
   })
 );
 
@@ -309,15 +309,15 @@ router.post(
   '/bank-instructions/:id/enable',
   requireConfigRole,
   asyncHandler(async (req, res) => {
-    const row = get('SELECT * FROM bank_instructions WHERE id = ?', [req.params.id]);
+    const row = await get('SELECT * FROM bank_instructions WHERE id = ?', [req.params.id]);
     if (!row) throw notFound('Bank instruction profile not found.');
-    run('UPDATE bank_instructions SET enabled = ?, updated_at = ? WHERE id = ?', [req.body?.enabled === false ? 0 : 1, isoNow(), row.id]);
-    audit(req, {
+    await run('UPDATE bank_instructions SET enabled = ?, updated_at = ? WHERE id = ?', [req.body?.enabled === false ? 0 : 1, isoNow(), row.id]);
+    await audit(req, {
       action: req.body?.enabled === false ? 'bank_instructions_disabled' : 'bank_instructions_enabled',
       entity: 'bank_instructions',
       entityId: row.id,
     });
-    res.json({ profile: serializeProfile(get('SELECT * FROM bank_instructions WHERE id = ?', [row.id])) });
+    res.json({ profile: serializeProfile(await get('SELECT * FROM bank_instructions WHERE id = ?', [row.id])) });
   })
 );
 
@@ -335,15 +335,19 @@ router.put(
     } catch (e) {
       throw zodError(e);
     }
-    body.orderedIds.forEach((id, idx) => {
-      run('UPDATE bank_instructions SET sort_order = ?, updated_at = ? WHERE id = ? AND currency = ?', [
-        idx,
+    // Same reason as above: `forEach(async ...)` never awaits the callback, so
+    // the updates would still be in flight when the response was sent.
+    let sortIndex = 0;
+    for (const id of body.orderedIds) {
+      await run('UPDATE bank_instructions SET sort_order = ?, updated_at = ? WHERE id = ? AND currency = ?', [
+        sortIndex,
         isoNow(),
         id,
         body.currency,
       ]);
-    });
-    audit(req, { action: 'bank_instructions_reordered', entity: 'bank_instructions', details: { currency: body.currency } });
+      sortIndex += 1;
+    }
+    await audit(req, { action: 'bank_instructions_reordered', entity: 'bank_instructions', details: { currency: body.currency } });
     res.json({ ok: true });
   })
 );
@@ -353,16 +357,16 @@ router.delete(
   '/bank-instructions/:id',
   requireConfigRole,
   asyncHandler(async (req, res) => {
-    const row = get('SELECT * FROM bank_instructions WHERE id = ?', [req.params.id]);
+    const row = await get('SELECT * FROM bank_instructions WHERE id = ?', [req.params.id]);
     if (!row) throw notFound('Bank instruction profile not found.');
-    const refs = get('SELECT COUNT(*) AS n FROM payment_references WHERE bank_profile_id = ?', [row.id]).n;
+    const refs = (await get('SELECT COUNT(*) AS n FROM payment_references WHERE bank_profile_id = ?', [row.id])).n;
     if (refs > 0) {
       throw conflict(
         `This profile is referenced by ${refs} issued payment reference(s). Disable it instead — historical instructions must remain intact.`
       );
     }
-    run('DELETE FROM bank_instructions WHERE id = ?', [row.id]);
-    audit(req, {
+    await run('DELETE FROM bank_instructions WHERE id = ?', [row.id]);
+    await audit(req, {
       action: 'bank_instructions_deleted',
       entity: 'bank_instructions',
       entityId: row.id,
@@ -435,7 +439,7 @@ function serializeWU(row) {
 router.get(
   '/western-union',
   asyncHandler(async (_req, res) => {
-    res.json({ config: serializeWU(get('SELECT * FROM western_union_config WHERE id = 1')) });
+    res.json({ config: serializeWU(await get('SELECT * FROM western_union_config WHERE id = 1')) });
   })
 );
 
@@ -450,7 +454,7 @@ router.put(
       throw zodError(e);
     }
     for (const code of body.currencies) {
-      const c = get('SELECT code FROM currencies WHERE code = ?', [code.toUpperCase()]);
+      const c = await get('SELECT code FROM currencies WHERE code = ?', [code.toUpperCase()]);
       if (!c) throw badRequest(`Unknown currency "${code}".`);
     }
     const invalidSender = body.requiredSenderInfo.filter((v) => !WU_SENDER_INFO_OPTIONS.includes(v));
@@ -467,7 +471,7 @@ router.put(
       }
     }
     const now = isoNow();
-    run(
+    await run(
       `INSERT INTO western_union_config (id, display_name, currencies, countries, recipient_name, recipient_location,
          country_of_receipt, instructions, required_sender_info, required_recipient_info, mtcn_required,
          receipt_required, additional_notes, client_instructions, help_text, enabled, updated_at)
@@ -499,13 +503,13 @@ router.put(
         now,
       ]
     );
-    audit(req, {
+    await audit(req, {
       action: 'western_union_config_updated',
       entity: 'western_union_config',
       entityId: 1,
       details: { enabled: body.enabled, currencies: body.currencies },
     });
-    res.json({ config: serializeWU(get('SELECT * FROM western_union_config WHERE id = 1')) });
+    res.json({ config: serializeWU(await get('SELECT * FROM western_union_config WHERE id = 1')) });
   })
 );
 

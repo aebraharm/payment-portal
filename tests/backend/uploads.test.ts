@@ -77,7 +77,7 @@ describe('receipt uploads and file security', () => {
   });
 
   it('stores files outside the web root under a private directory', async () => {
-    const row = get('SELECT stored_filename, mime_type FROM receipts WHERE id = ?', [receiptId]);
+    const row = await get('SELECT stored_filename, mime_type FROM receipts WHERE id = ?', [receiptId]);
     expect(row.stored_filename).toMatch(/^receipts\/\d{4}\/\d{2}\//);
     const absolute = path.join(config.uploadDir, row.stored_filename);
     expect(fs.existsSync(absolute)).toBe(true);

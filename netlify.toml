@@ -1,0 +1,66 @@
+# Netlify configuration — immigration agency payment portal.
+#
+# Static app + SPA routing: Netlify serves the Vite build from `dist/` and
+# rewrites every unknown path to `index.html` so client-side routes (/, /login,
+# /admin/login, /transactions/42, …) survive a direct visit or a refresh.
+#
+# The API runs as a Netlify Function (`netlify/functions/api.js`) and needs a
+# database and object store that outlive one invocation — see DEPLOYMENT.md
+# "Part D — Netlify (serverless)". Routing is ordered below: `/api/*` FIRST,
+# then the SPA fallback. Netlify applies the first matching rule, so an API
+# request that reached `/*` would be answered with index.html instead of JSON.
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[functions]
+  directory = "netlify/functions"
+  # `nft` traces the real module graph and copies the packages, instead of
+  # flattening everything into one bundled file. That matters here for two
+  # reasons: this project is ESM (`"type": "module"`) while express/body-parser
+  # are CommonJS, and an esbuild ESM bundle turns their `require('path')` into
+  # "Dynamic require is not supported" at cold start; and @libsql/client plus
+  # @aws-sdk/client-s3 resolve platform-specific optional bindings at
+  # require-time, which a bundle cannot reproduce.
+  node_bundler = "nft"
+  # Only imported JS is traced. The SQL migrations are read from disk at
+  # runtime by server/migrate.js, so without this the function deploys fine and
+  # then fails on the first request with "no such table".
+  included_files = ["/server/migrations/*.sql"]
+
+# The JSON API, before the catch-all. `/api/*` never matches a file in dist/, so
+# this rule is what gets it to the function; :splat preserves the sub-path.
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+
+# Single-page app fallback, LAST: Netlify takes the first match, so anything
+# placed after this would never run. Real files (hashed assets) are still
+# served directly.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Response headers for the static app, mirroring the CSP/security policy the
+# Express server sets (server/middleware/security.js) so both hosts behave alike.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "no-referrer"
+    Cross-Origin-Opener-Policy = "same-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=()"
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+
+# Vite emits content-hashed filenames, so they can be cached forever.
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

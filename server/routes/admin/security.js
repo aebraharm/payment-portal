@@ -34,8 +34,8 @@ router.get(
       params.push(like, like, like);
     }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-    const total = get(`SELECT COUNT(*) AS n FROM audit_logs ${whereSql}`, params).n;
-    const rows = all(
+    const total = (await get(`SELECT COUNT(*) AS n FROM audit_logs ${whereSql}`, params)).n;
+    const rows = await all(
       `SELECT * FROM audit_logs ${whereSql} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
       [...params, pageSize, (page - 1) * pageSize]
     );
@@ -48,7 +48,7 @@ router.get(
 router.get(
   '/sessions',
   asyncHandler(async (_req, res) => {
-    const rows = all(
+    const rows = await all(
       `SELECT s.id, s.actor_type, s.actor_id, s.expires_at, s.created_at, s.ip, s.user_agent,
               CASE WHEN s.actor_type = 'admin' THEN (SELECT email FROM admins WHERE id = s.actor_id)
                    ELSE (SELECT full_name FROM clients WHERE id = s.actor_id) END AS actor_label
@@ -64,11 +64,11 @@ router.get(
 router.post(
   '/sessions/:id/revoke',
   asyncHandler(async (req, res) => {
-    const row = get('SELECT * FROM sessions WHERE id = ?', [req.params.id]);
+    const row = await get('SELECT * FROM sessions WHERE id = ?', [req.params.id]);
     if (!row) throw notFound('Session not found.');
     if (row.revoked_at) throw badRequest('Session is already revoked.');
-    revokeSessionById(row.id);
-    audit(req, {
+    await revokeSessionById(row.id);
+    await audit(req, {
       action: 'session_revoked',
       entity: 'session',
       entityId: row.id,
@@ -84,7 +84,7 @@ router.get(
   '/admins',
   requireSuperadmin,
   asyncHandler(async (_req, res) => {
-    const rows = all('SELECT id, email, role, full_name, status, must_change_password, last_login_at, created_at FROM admins ORDER BY id');
+    const rows = await all('SELECT id, email, role, full_name, status, must_change_password, last_login_at, created_at FROM admins ORDER BY id');
     res.json({
       admins: rows.map((r) => ({ ...r, must_change_password: !!r.must_change_password })),
     });
@@ -107,15 +107,15 @@ router.post(
     } catch (e) {
       throw zodError(e);
     }
-    const existing = get('SELECT id FROM admins WHERE email = ?', [body.email]);
+    const existing = await get('SELECT id FROM admins WHERE email = ?', [body.email]);
     if (existing) throw badRequest('An administrator with this email already exists.');
     const now = isoNow();
-    const inserted = run(
+    const inserted = await run(
       `INSERT INTO admins (email, password_hash, role, full_name, status, must_change_password, created_at, updated_at)
        VALUES (?, ?, ?, ?, 'active', 1, ?, ?)`,
       [body.email, hashPassword(body.password), body.role, body.fullName?.trim() || null, now, now]
     );
-    audit(req, { action: 'admin_created', entity: 'admin', entityId: inserted.lastInsertRowid, details: { email: body.email, role: body.role } });
+    await audit(req, { action: 'admin_created', entity: 'admin', entityId: inserted.lastInsertRowid, details: { email: body.email, role: body.role } });
     res.status(201).json({ ok: true, adminId: inserted.lastInsertRowid });
   })
 );
@@ -124,7 +124,7 @@ router.put(
   '/admins/:id',
   requireSuperadmin,
   asyncHandler(async (req, res) => {
-    const row = get('SELECT * FROM admins WHERE id = ?', [req.params.id]);
+    const row = await get('SELECT * FROM admins WHERE id = ?', [req.params.id]);
     if (!row) throw notFound('Administrator not found.');
     if (Number(req.params.id) === req.admin.id) {
       throw badRequest('Use the account page to change your own password; role/status changes to your own account are not allowed here.');
@@ -140,7 +140,7 @@ router.put(
     } catch (e) {
       throw zodError(e);
     }
-    run('UPDATE admins SET role = ?, status = ?, full_name = ?, updated_at = ? WHERE id = ?', [
+    await run('UPDATE admins SET role = ?, status = ?, full_name = ?, updated_at = ? WHERE id = ?', [
       body.role ?? row.role,
       body.status ?? row.status,
       body.fullName === undefined ? row.full_name : body.fullName || null,
@@ -148,13 +148,13 @@ router.put(
       row.id,
     ]);
     if (body.status === 'disabled') {
-      run('UPDATE sessions SET revoked_at = ? WHERE actor_type = ? AND actor_id = ? AND revoked_at IS NULL', [
+      await run('UPDATE sessions SET revoked_at = ? WHERE actor_type = ? AND actor_id = ? AND revoked_at IS NULL', [
         isoNow(),
         'admin',
         row.id,
       ]);
     }
-    audit(req, { action: 'admin_updated', entity: 'admin', entityId: row.id, details: { role: body.role, status: body.status } });
+    await audit(req, { action: 'admin_updated', entity: 'admin', entityId: row.id, details: { role: body.role, status: body.status } });
     res.json({ ok: true });
   })
 );
@@ -164,20 +164,20 @@ router.post(
   '/admins/:id/password-reset',
   requireSuperadmin,
   asyncHandler(async (req, res) => {
-    const row = get('SELECT * FROM admins WHERE id = ?', [req.params.id]);
+    const row = await get('SELECT * FROM admins WHERE id = ?', [req.params.id]);
     if (!row) throw notFound('Administrator not found.');
     const tempPassword = crypto.randomBytes(9).toString('base64url').slice(0, 14);
-    run('UPDATE admins SET password_hash = ?, must_change_password = 1, updated_at = ? WHERE id = ?', [
+    await run('UPDATE admins SET password_hash = ?, must_change_password = 1, updated_at = ? WHERE id = ?', [
       hashPassword(tempPassword),
       isoNow(),
       row.id,
     ]);
-    run('UPDATE sessions SET revoked_at = ? WHERE actor_type = ? AND actor_id = ? AND revoked_at IS NULL', [
+    await run('UPDATE sessions SET revoked_at = ? WHERE actor_type = ? AND actor_id = ? AND revoked_at IS NULL', [
       isoNow(),
       'admin',
       row.id,
     ]);
-    audit(req, { action: 'admin_password_reset', entity: 'admin', entityId: row.id });
+    await audit(req, { action: 'admin_password_reset', entity: 'admin', entityId: row.id });
     res.json({ ok: true, temporaryPassword: tempPassword });
   })
 );
@@ -192,8 +192,8 @@ router.get(
     const status = req.query.status ? String(req.query.status) : '';
     const where = status ? 'WHERE status = ?' : '';
     const params = status ? [status] : [];
-    const total = get(`SELECT COUNT(*) AS n FROM notifications ${where}`, params).n;
-    const rows = all(
+    const total = (await get(`SELECT COUNT(*) AS n FROM notifications ${where}`, params)).n;
+    const rows = await all(
       `SELECT * FROM notifications ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
       [...params, pageSize, (page - 1) * pageSize]
     );

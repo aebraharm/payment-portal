@@ -34,7 +34,7 @@ router.get(
       params.push(like, like, like, like);
     }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-    const rows = all(
+    const rows = await all(
       `SELECT pc.*, pr.ref_code, i.invoice_ref, c.full_name AS client_name, c.client_code,
               a.email AS reviewer_email
          FROM payment_confirmations pc
@@ -77,7 +77,7 @@ router.get(
           .join(',')
       );
     }
-    audit(req, { action: 'transactions_report_exported', entity: 'report', details: { rows: rows.length } });
+    await audit(req, { action: 'transactions_report_exported', entity: 'report', details: { rows: rows.length } });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="transactions-report.csv"');
     res.send(lines.join('\n'));

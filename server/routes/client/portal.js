@@ -6,6 +6,7 @@ import { run, get, all, tx, isoNow, parseJson } from '../../db.js';
 import { generatePaymentRef } from '../../lib/refs.js';
 import { asyncHandler, badRequest, notFound, conflict, zodError } from '../../lib/http.js';
 import { audit } from '../../lib/audit.js';
+import { config } from '../../config.js';
 import { requireClient } from '../../middleware/auth.js';
 import { notifyFromTemplate } from '../../lib/notify.js';
 import {
@@ -30,20 +31,20 @@ const upload = multer({
 
 // ------------------------------------------------------------------ helpers
 
-function ownInvoiceOr404(clientId, invoiceId) {
-  const invoice = get('SELECT * FROM invoices WHERE id = ? AND client_id = ?', [invoiceId, clientId]);
+async function ownInvoiceOr404(clientId, invoiceId) {
+  const invoice = await get('SELECT * FROM invoices WHERE id = ? AND client_id = ?', [invoiceId, clientId]);
   if (!invoice) throw notFound('Invoice not found.');
   return invoice;
 }
 
-function ownReferenceOr404(clientId, refId) {
-  const ref = get('SELECT * FROM payment_references WHERE id = ? AND client_id = ?', [refId, clientId]);
+async function ownReferenceOr404(clientId, refId) {
+  const ref = await get('SELECT * FROM payment_references WHERE id = ? AND client_id = ?', [refId, clientId]);
   if (!ref) throw notFound('Payment reference not found.');
   return ref;
 }
 
-function ownConfirmationOr404(clientId, confirmationId) {
-  const row = get('SELECT * FROM payment_confirmations WHERE id = ? AND client_id = ?', [confirmationId, clientId]);
+async function ownConfirmationOr404(clientId, confirmationId) {
+  const row = await get('SELECT * FROM payment_confirmations WHERE id = ? AND client_id = ?', [confirmationId, clientId]);
   if (!row) throw notFound('Transaction not found.');
   return row;
 }
@@ -112,12 +113,12 @@ router.get(
   '/dashboard',
   asyncHandler(async (req, res) => {
     const clientId = req.portalClient.id;
-    const client = get('SELECT * FROM clients WHERE id = ?', [clientId]);
-    const outstandingInvoices = all(
+    const client = await get('SELECT * FROM clients WHERE id = ?', [clientId]);
+    const outstandingInvoices = (await all(
       `SELECT * FROM invoices WHERE client_id = ? AND status IN ('unpaid','awaiting_payment','confirmation_submitted','under_review','rejected','partially_paid')
         ORDER BY due_date ASC`,
       [clientId]
-    ).map((r) => ({
+    )).map((r) => ({
       id: r.id,
       invoiceRef: r.invoice_ref,
       description: r.description,
@@ -138,12 +139,12 @@ router.get(
       formatted: formatMoney(cents, currency),
     }));
 
-    const recentConfirmations = all(`${CONFIRMATION_SQL} ORDER BY pc.created_at DESC LIMIT 5`, [clientId]).map(
-      serializeConfirmation
+    const recentConfirmations = await Promise.all(
+      (await all(`${CONFIRMATION_SQL} ORDER BY pc.created_at DESC LIMIT 5`, [clientId])).map(serializeConfirmation)
     );
 
     // Recent status updates across this client's confirmations.
-    const statusUpdates = all(
+    const statusUpdates = await all(
       `SELECT h.*, pc.id AS confirmation_id, pr.ref_code
          FROM confirmation_status_history h
          JOIN payment_confirmations pc ON pc.id = h.confirmation_id
@@ -153,7 +154,7 @@ router.get(
       [clientId]
     );
 
-    const branding = getPublicBranding();
+    const branding = await getPublicBranding();
     res.json({
       client: {
         id: client.id,
@@ -161,7 +162,7 @@ router.get(
         fullName: client.full_name,
         email: client.email,
       },
-      welcomeMessage: getSetting('welcome_message') || '',
+      welcomeMessage: await getSetting('welcome_message') || '',
       outstandingInvoices,
       outstandingTotals,
       recentConfirmations,
@@ -172,7 +173,7 @@ router.get(
         whatsapp: branding.whatsappNumber,
         officeAddress: branding.officeAddress,
       },
-      currencies: getEnabledCurrencies(),
+      currencies: await getEnabledCurrencies(),
     });
   })
 );
@@ -182,7 +183,7 @@ router.get(
 router.get(
   '/invoices',
   asyncHandler(async (req, res) => {
-    const rows = all('SELECT * FROM invoices WHERE client_id = ? ORDER BY created_at DESC', [req.portalClient.id]);
+    const rows = await all('SELECT * FROM invoices WHERE client_id = ? ORDER BY created_at DESC', [req.portalClient.id]);
     res.json({
       invoices: rows.map((r) => ({
         id: r.id,
@@ -204,16 +205,18 @@ router.get(
 router.get(
   '/invoices/:id',
   asyncHandler(async (req, res) => {
-    const invoice = ownInvoiceOr404(req.portalClient.id, req.params.id);
-    const lineItems = all('SELECT * FROM invoice_line_items WHERE invoice_id = ? ORDER BY sort_order, id', [invoice.id]);
-    const references = all(
+    const invoice = await ownInvoiceOr404(req.portalClient.id, req.params.id);
+    const lineItems = await all('SELECT * FROM invoice_line_items WHERE invoice_id = ? ORDER BY sort_order, id', [invoice.id]);
+    const references = (await all(
       'SELECT * FROM payment_references WHERE invoice_id = ? ORDER BY created_at DESC',
       [invoice.id]
-    ).map(serializeReference);
-    const confirmations = all(`${CONFIRMATION_SQL} AND pc.invoice_id = ? ORDER BY pc.created_at DESC`, [
-      req.portalClient.id,
-      invoice.id,
-    ]).map(serializeConfirmation);
+    )).map(serializeReference);
+    const confirmations = await Promise.all(
+      (await all(`${CONFIRMATION_SQL} AND pc.invoice_id = ? ORDER BY pc.created_at DESC`, [
+        req.portalClient.id,
+        invoice.id,
+      ])).map(serializeConfirmation)
+    );
     res.json({
       invoice: {
         id: invoice.id,
@@ -249,22 +252,22 @@ router.get(
     const invoiceId = Number(req.query.invoiceId);
     let currency = null;
     if (invoiceId) {
-      const invoice = ownInvoiceOr404(req.portalClient.id, invoiceId);
+      const invoice = await ownInvoiceOr404(req.portalClient.id, invoiceId);
       currency = invoice.currency;
     }
-    const methods = getAvailableMethodsForCurrency(currency || 'USD');
+    const methods = await getAvailableMethodsForCurrency(currency || 'USD');
     const settings = {
-      requireReceiptUpload: !!getSetting('require_receipt_upload'),
-      requireSenderName: !!getSetting('require_sender_name'),
-      requireTransferReference: !!getSetting('require_transfer_reference'),
-      receiptMaxSizeMb: Number(getSetting('receipt_max_size_mb')) || 10,
-      allowedReceiptTypes: getSetting('allowed_receipt_types') || ['pdf', 'jpg', 'jpeg', 'png'],
+      requireReceiptUpload: !!await getSetting('require_receipt_upload'),
+      requireSenderName: !!await getSetting('require_sender_name'),
+      requireTransferReference: !!await getSetting('require_transfer_reference'),
+      receiptMaxSizeMb: Number(await getSetting('receipt_max_size_mb')) || 10,
+      allowedReceiptTypes: await getSetting('allowed_receipt_types') || ['pdf', 'jpg', 'jpeg', 'png'],
       cardLabel: CARD_LABEL,
     };
     res.json({
       invoiceCurrency: currency,
       methods: currency ? methods : methods.map((m) => ({ ...m, available: false, reason: 'Select an invoice first.' })),
-      currencies: getEnabledCurrencies(),
+      currencies: await getEnabledCurrencies(),
       settings,
     });
   })
@@ -287,7 +290,7 @@ router.post(
       throw zodError(e);
     }
 
-    const invoice = ownInvoiceOr404(req.portalClient.id, body.invoiceId);
+    const invoice = await ownInvoiceOr404(req.portalClient.id, body.invoiceId);
     if (!['unpaid', 'awaiting_payment', 'rejected'].includes(invoice.status)) {
       throw conflict(`This invoice cannot be paid in its current status ("${invoice.status}").`);
     }
@@ -298,7 +301,7 @@ router.post(
         `This invoice is billed in ${invoice.currency}. Currency conversion is not supported — please pay in ${invoice.currency}.`
       );
     }
-    const currencyRow = getCurrency(invoice.currency);
+    const currencyRow = await getCurrency(invoice.currency);
     if (!currencyRow || !currencyRow.enabled) {
       throw badRequest(`Currency ${invoice.currency} is not currently enabled. Please contact support.`);
     }
@@ -308,7 +311,7 @@ router.post(
       throw badRequest(`${CARD_LABEL}. Please choose bank transfer or Western Union instead.`);
     }
 
-    const method = getPaymentMethod(body.method);
+    const method = await getPaymentMethod(body.method);
     if (!method || !method.enabled) {
       throw badRequest('This payment method is not available.');
     }
@@ -316,7 +319,7 @@ router.post(
     let snapshot = null;
     let bankProfileId = null;
     if (body.method === 'bank_transfer') {
-      snapshot = buildBankTransferSnapshot(invoice.currency);
+      snapshot = await buildBankTransferSnapshot(invoice.currency);
       if (!snapshot) {
         throw badRequest(
           `Bank transfer instructions for ${invoice.currency} have not been configured yet. Please contact support.`
@@ -324,7 +327,7 @@ router.post(
       }
       bankProfileId = snapshot.profile.id;
     } else if (body.method === 'western_union') {
-      snapshot = buildWesternUnionSnapshot();
+      snapshot = await buildWesternUnionSnapshot();
       if (!snapshot || !snapshot.currencies.includes(invoice.currency)) {
         throw badRequest(`Western Union transfers are not available for ${invoice.currency}. Please choose another method.`);
       }
@@ -332,14 +335,14 @@ router.post(
       throw badRequest('Unsupported payment method.');
     }
 
-    const prefix = getSetting('transaction_ref_prefix') || 'PAY';
-    const refCode = generatePaymentRef(prefix);
+    const prefix = await getSetting('transaction_ref_prefix') || 'PAY';
+    const refCode = await generatePaymentRef(prefix);
     const now = isoNow();
     snapshot.generatedAt = now;
     snapshot.amountCents = invoice.amount_cents;
     snapshot.invoiceRef = invoice.invoice_ref;
 
-    const inserted = run(
+    const inserted = await run(
       `INSERT INTO payment_references (ref_code, invoice_id, client_id, method, currency, amount_cents, instructions_snapshot, bank_profile_id, status, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'issued', ?, ?)`,
       [
@@ -355,8 +358,8 @@ router.post(
         now,
       ]
     );
-    run(`UPDATE invoices SET status = 'awaiting_payment', updated_at = ? WHERE id = ?`, [now, invoice.id]);
-    audit(req, {
+    await run(`UPDATE invoices SET status = 'awaiting_payment', updated_at = ? WHERE id = ?`, [now, invoice.id]);
+    await audit(req, {
       action: 'payment_instructions_issued',
       entity: 'payment_reference',
       entityId: inserted.lastInsertRowid,
@@ -375,7 +378,7 @@ router.post(
     });
 
     res.status(201).json({
-      reference: serializeReference(get('SELECT * FROM payment_references WHERE id = ?', [inserted.lastInsertRowid])),
+      reference: serializeReference(await get('SELECT * FROM payment_references WHERE id = ?', [inserted.lastInsertRowid])),
     });
   })
 );
@@ -383,15 +386,30 @@ router.post(
 router.get(
   '/payment-references/:id',
   asyncHandler(async (req, res) => {
-    const ref = ownReferenceOr404(req.portalClient.id, req.params.id);
+    const ref = await ownReferenceOr404(req.portalClient.id, req.params.id);
     res.json({ reference: serializeReference(ref) });
   })
 );
 
 // ------------------------------------------------------------ confirmations
 
-function receiptSettings() {
-  const allowedTypes = getSetting('allowed_receipt_types') || ['pdf', 'jpg', 'jpeg', 'png'];
+/**
+ * On a serverless host the function itself refuses a request body over ~6 MB,
+ * so an upload larger than that fails at the platform with an opaque error
+ * before this app ever sees it. Clamping the application limit just below it
+ * turns that into the normal, translatable "Receipt exceeds the maximum size of
+ * 5 MB" response instead.
+ */
+export const SERVERLESS_MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+
+/** Configured per-receipt ceiling, in bytes, clamped for the host it runs on. */
+export function receiptMaxBytes(configuredMb) {
+  const bytes = (Number(configuredMb) || 10) * 1024 * 1024;
+  return config.isServerless ? Math.min(bytes, SERVERLESS_MAX_UPLOAD_BYTES) : bytes;
+}
+
+async function receiptSettings() {
+  const allowedTypes = await getSetting('allowed_receipt_types') || ['pdf', 'jpg', 'jpeg', 'png'];
   const allowed = {};
   for (const t of allowedTypes) {
     if (RECEIPT_MIME_TYPES[t]) allowed[t] = RECEIPT_MIME_TYPES[t];
@@ -401,12 +419,12 @@ function receiptSettings() {
   }
   return {
     allowed,
-    maxBytes: (Number(getSetting('receipt_max_size_mb')) || 10) * 1024 * 1024,
+    maxBytes: receiptMaxBytes(await getSetting('receipt_max_size_mb')),
   };
 }
 
-function storeReceipt({ buffer, originalName, confirmationId, clientId }) {
-  const { allowed, maxBytes } = receiptSettings();
+async function storeReceipt({ buffer, originalName, confirmationId, clientId }) {
+  const { allowed, maxBytes } = await receiptSettings();
   let validated;
   try {
     validated = validateFileBuffer({ buffer, originalName, allowed, maxBytes, label: 'Receipt' });
@@ -414,8 +432,8 @@ function storeReceipt({ buffer, originalName, confirmationId, clientId }) {
     if ( e instanceof FileValidationError) throw badRequest(e.message);
     throw e;
   }
-  const stored = storeFile({ buffer, subdir: 'receipts', ext: validated.ext });
-  run(
+  const stored = await storeFile({ buffer, subdir: 'receipts', ext: validated.ext, contentType: validated.mime });
+  await run(
     `INSERT INTO receipts (confirmation_id, client_id, original_filename, stored_filename, mime_type, size_bytes, sha256, uploaded_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     [
@@ -429,7 +447,7 @@ function storeReceipt({ buffer, originalName, confirmationId, clientId }) {
       isoNow(),
     ]
   );
-  audit(null, {
+  await audit(null, {
     actor: { type: 'client', id: clientId },
     action: 'receipt_uploaded',
     entity: 'receipt',
@@ -470,21 +488,21 @@ router.post(
       ? String(req.headers['idempotency-key']).slice(0, 120)
       : null;
     if (idempotencyKey) {
-      const existing = get('SELECT * FROM payment_confirmations WHERE idempotency_key = ?', [idempotencyKey]);
+      const existing = await get('SELECT * FROM payment_confirmations WHERE idempotency_key = ?', [idempotencyKey]);
       if (existing && existing.client_id === req.portalClient.id) {
-        const replayRow = get(`${CONFIRMATION_SQL} AND pc.id = ?`, [req.portalClient.id, existing.id]);
+        const replayRow = await get(`${CONFIRMATION_SQL} AND pc.id = ?`, [req.portalClient.id, existing.id]);
         if (replayRow) {
-          res.json({ confirmation: serializeConfirmation(replayRow), idempotentReplay: true });
+          res.json({ confirmation: await serializeConfirmation(replayRow), idempotentReplay: true });
           return;
         }
       }
     }
 
-    const reference = ownReferenceOr404(req.portalClient.id, body.paymentReferenceId);
+    const reference = await ownReferenceOr404(req.portalClient.id, body.paymentReferenceId);
     if (!['issued', 'rejected', 'info_requested'].includes(reference.status)) {
       throw conflict('A confirmation for this payment reference is already being processed.');
     }
-    const invoice = get('SELECT * FROM invoices WHERE id = ?', [reference.invoice_id]);
+    const invoice = await get('SELECT * FROM invoices WHERE id = ?', [reference.invoice_id]);
     if (!invoice) throw notFound('Invoice not found.');
 
     // Validate against the server-trusted reference, never the browser.
@@ -507,11 +525,11 @@ router.post(
       throw badRequest('The date sent cannot be in the future.');
     }
     const snapshot = parseJson(reference.instructions_snapshot, {});
-    const requireSender = getSetting('require_sender_name') !== false;
-    const requireTransferRef = getSetting('require_transfer_reference') !== false;
+    const requireSender = await getSetting('require_sender_name') !== false;
+    const requireTransferRef = await getSetting('require_transfer_reference') !== false;
     const wuMtcnRequired = reference.method === 'western_union' && snapshot.mtcnRequired !== false;
     const requireReceipt =
-      getSetting('require_receipt_upload') !== false ||
+      await getSetting('require_receipt_upload') !== false ||
       (reference.method === 'western_union' && snapshot.receiptRequired !== false);
     if (requireSender && !body.senderName?.trim()) {
       throw badRequest('Sender / remitter name is required.');
@@ -524,10 +542,10 @@ router.post(
     }
 
     const now = isoNow();
-    const confirmationId = tx(() => {
+    const confirmationId = await tx(async () => {
       let inserted;
       try {
-        inserted = run(
+        inserted = await run(
           `INSERT INTO payment_confirmations
              (payment_reference_id, invoice_id, client_id, method, sent_date, amount_sent_cents, currency,
               sender_name, transfer_reference, transaction_id, note, status, idempotency_key, created_at, updated_at)
@@ -554,7 +572,7 @@ router.post(
           throw conflict('A confirmation for this payment reference is already under review.');
         }
         if (String(err.message).includes('idx_confirmations_idempotency')) {
-          const existing = get('SELECT * FROM payment_confirmations WHERE idempotency_key = ?', [idempotencyKey]);
+          const existing = await get('SELECT * FROM payment_confirmations WHERE idempotency_key = ?', [idempotencyKey]);
           if (existing) throw conflict('This submission was already received.', { existingId: existing.id });
         }
         throw err;
@@ -563,31 +581,31 @@ router.post(
       if (req.file) {
         // Store the receipt inside the same transaction boundary of intent;
         // a storage failure rolls back the confirmation row.
-        storeReceipt({
+        await storeReceipt({
           buffer: req.file.buffer,
           originalName: req.file.originalname,
           confirmationId: id,
           clientId: req.portalClient.id,
         });
       }
-      run(
+      await run(
         'INSERT INTO confirmation_status_history (confirmation_id, status, note, actor_type, actor_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
         [id, 'submitted', 'Client submitted payment confirmation.', 'client', req.portalClient.id, now]
       );
-      run(`UPDATE payment_references SET status = 'confirmation_submitted', updated_at = ? WHERE id = ?`, [now, reference.id]);
-      run(`UPDATE invoices SET status = 'confirmation_submitted', updated_at = ? WHERE id = ?`, [now, invoice.id]);
+      await run(`UPDATE payment_references SET status = 'confirmation_submitted', updated_at = ? WHERE id = ?`, [now, reference.id]);
+      await run(`UPDATE invoices SET status = 'confirmation_submitted', updated_at = ? WHERE id = ?`, [now, invoice.id]);
       return id;
     });
 
-    audit(req, {
+    await audit(req, {
       action: 'payment_confirmation_submitted',
       entity: 'payment_confirmation',
       entityId: confirmationId,
       details: { refCode: reference.ref_code, method: reference.method, amountCents },
     });
 
-    const row = get(`${CONFIRMATION_SQL} AND pc.id = ?`, [req.portalClient.id, confirmationId]);
-    if (getSetting('notify_on_confirmation_submitted') !== false) {
+    const row = await get(`${CONFIRMATION_SQL} AND pc.id = ?`, [req.portalClient.id, confirmationId]);
+    if (await getSetting('notify_on_confirmation_submitted') !== false) {
       await notifyFromTemplate('payment_confirmation_submitted', {
         vars: {
           payment_ref: reference.ref_code,
@@ -603,31 +621,31 @@ router.post(
       });
     }
 
-    res.status(201).json({ confirmation: serializeConfirmation(row) });
+    res.status(201).json({ confirmation: await serializeConfirmation(row) });
   })
 );
 
 router.get(
   '/confirmations',
   asyncHandler(async (req, res) => {
-    const rows = all(`${CONFIRMATION_SQL} ORDER BY pc.created_at DESC`, [req.portalClient.id]);
-    res.json({ confirmations: rows.map(serializeConfirmation) });
+    const rows = await all(`${CONFIRMATION_SQL} ORDER BY pc.created_at DESC`, [req.portalClient.id]);
+    res.json({ confirmations: await Promise.all(rows.map(serializeConfirmation)) });
   })
 );
 
 router.get(
   '/confirmations/:id',
   asyncHandler(async (req, res) => {
-    const row = get(`${CONFIRMATION_SQL} AND pc.id = ?`, [req.portalClient.id, req.params.id]);
+    const row = await get(`${CONFIRMATION_SQL} AND pc.id = ?`, [req.portalClient.id, req.params.id]);
     if (!row) throw notFound('Transaction not found.');
-    const receipts = all('SELECT * FROM receipts WHERE confirmation_id = ? ORDER BY uploaded_at', [row.id]).map(serializeReceipt);
-    const history = all(
+    const receipts = (await all('SELECT * FROM receipts WHERE confirmation_id = ? ORDER BY uploaded_at', [row.id])).map(serializeReceipt);
+    const history = await all(
       'SELECT * FROM confirmation_status_history WHERE confirmation_id = ? ORDER BY created_at, id',
       [row.id]
     );
-    const reference = get('SELECT * FROM payment_references WHERE id = ?', [row.payment_reference_id]);
+    const reference = await get('SELECT * FROM payment_references WHERE id = ?', [row.payment_reference_id]);
     res.json({
-      confirmation: serializeConfirmation(row),
+      confirmation: await serializeConfirmation(row),
       receipts,
       history,
       reference: reference ? serializeReference(reference) : null,
@@ -640,23 +658,23 @@ router.post(
   '/confirmations/:id/receipts',
   (req, res, next) => upload.single('receipt')(req, res, next),
   asyncHandler(async (req, res) => {
-    const confirmation = ownConfirmationOr404(req.portalClient.id, req.params.id);
+    const confirmation = await ownConfirmationOr404(req.portalClient.id, req.params.id);
     if (!['submitted', 'under_review', 'info_requested', 'rejected'].includes(confirmation.status)) {
       throw conflict('Receipts cannot be added to this transaction in its current status.');
     }
     if (!req.file) throw badRequest('Upload a receipt file (field name "receipt").');
     const MAX_RECEIPTS_PER_CONFIRMATION = 10;
-    const existing = get('SELECT COUNT(*) AS n FROM receipts WHERE confirmation_id = ?', [confirmation.id]).n;
+    const existing = (await get('SELECT COUNT(*) AS n FROM receipts WHERE confirmation_id = ?', [confirmation.id])).n;
     if (existing >= MAX_RECEIPTS_PER_CONFIRMATION) {
       throw badRequest(`A transaction can have at most ${MAX_RECEIPTS_PER_CONFIRMATION} receipt files. Contact support if you need to replace one.`);
     }
-    storeReceipt({
+    await storeReceipt({
       buffer: req.file.buffer,
       originalName: req.file.originalname,
       confirmationId: confirmation.id,
       clientId: req.portalClient.id,
     });
-    const receipts = all('SELECT * FROM receipts WHERE confirmation_id = ? ORDER BY uploaded_at', [confirmation.id]).map(serializeReceipt);
+    const receipts = (await all('SELECT * FROM receipts WHERE confirmation_id = ? ORDER BY uploaded_at', [confirmation.id])).map(serializeReceipt);
     res.status(201).json({ receipts });
   })
 );
@@ -666,16 +684,16 @@ router.post(
 router.get(
   '/transactions',
   asyncHandler(async (req, res) => {
-    const references = all(
+    const references = await all(
       `SELECT pr.*, i.invoice_ref
          FROM payment_references pr JOIN invoices i ON i.id = pr.invoice_id
         WHERE pr.client_id = ? ORDER BY pr.created_at DESC`,
       [req.portalClient.id]
     );
-    const confirmations = all(`${CONFIRMATION_SQL} ORDER BY pc.created_at DESC`, [req.portalClient.id]);
+    const confirmations = await all(`${CONFIRMATION_SQL} ORDER BY pc.created_at DESC`, [req.portalClient.id]);
     res.json({
       references: references.map((r) => ({ ...serializeReference(r), invoiceRef: r.invoice_ref })),
-      confirmations: confirmations.map(serializeConfirmation),
+      confirmations: await Promise.all(confirmations.map(serializeConfirmation)),
     });
   })
 );

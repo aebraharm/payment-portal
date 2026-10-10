@@ -43,7 +43,7 @@ function sanitize(value, depth = 0) {
   return out;
 }
 
-export function audit(req, { actor, action, entity, entityId, details }) {
+export async function audit(req, { actor, action, entity, entityId, details }) {
   let actorType = 'system';
   let actorId = null;
   if (actor) {
@@ -57,7 +57,7 @@ export function audit(req, { actor, action, entity, entityId, details }) {
     actorId = req.portalClient.id;
   }
   try {
-    run(
+    await run(
       `INSERT INTO audit_logs (actor_type, actor_id, action, entity, entity_id, details, ip, user_agent, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [

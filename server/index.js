@@ -1,10 +1,11 @@
 import { createApp } from './app.js';
-import { migrate } from './migrate.js';
+import { ensureMigrated } from './migrate.js';
 import { seedDatabase } from './seed.js';
-import { config } from './config.js';
+import { config, assertProductionConfig } from './config.js';
 
 async function main() {
-  migrate();
+  assertProductionConfig();
+  await ensureMigrated();
   await seedDatabase();
 
   let spaHandler;

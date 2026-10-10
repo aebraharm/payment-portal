@@ -2,10 +2,10 @@ import express from 'express';
 import cookieParser from 'cookie-parser';
 import path from 'node:path';
 import fs from 'node:fs';
-import { migrate } from './migrate.js';
 import { helmetMiddleware, originCheck, generalLimiter } from './middleware/security.js';
 import { attachActors } from './middleware/auth.js';
 import { notFoundHandler, errorHandler } from './middleware/error.js';
+import { createSpaMiddleware } from './lib/spa.js';
 import { config } from './config.js';
 
 import publicRoutes from './routes/public.js';
@@ -24,10 +24,13 @@ import clientPortalRoutes from './routes/client/portal.js';
 /**
  * Build the Express application. `spaHandler` (optional) serves the built
  * frontend / dev-server middleware and must be mounted after the API routes.
+ *
+ * Synchronous and side-effect free on purpose: on Netlify this runs inside a
+ * function, where a cold start has to be as cheap as possible, so schema
+ * migration is a separate, memoized step (`ensureMigrated()`), not something
+ * `createApp()` does on every invocation.
  */
 export function createApp({ spaHandler } = {}) {
-  migrate();
-
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', config.trustProxy);
@@ -60,11 +63,7 @@ export function createApp({ spaHandler } = {}) {
   } else if (config.isProduction) {
     const distDir = path.join(config.rootDir, 'dist');
     if (fs.existsSync(distDir)) {
-      app.use(express.static(distDir));
-      app.get('*', (req, res, next) => {
-        if (req.path.startsWith('/api/')) return next();
-        res.sendFile(path.join(distDir, 'index.html'));
-      });
+      app.use(createSpaMiddleware({ distDir }));
     }
   }
 

@@ -83,8 +83,8 @@ export const DEFAULT_SETTINGS = {
   notify_on_invoice_created: true,
 };
 
-export function getSetting(key) {
-  const row = get('SELECT value FROM settings WHERE key = ?', [key]);
+export async function getSetting(key) {
+  const row = await get('SELECT value FROM settings WHERE key = ?', [key]);
   if (!row) return DEFAULT_SETTINGS[key];
   try {
     return JSON.parse(row.value);
@@ -93,8 +93,8 @@ export function getSetting(key) {
   }
 }
 
-export function getAllSettings() {
-  const rows = all('SELECT key, value, updated_at FROM settings');
+export async function getAllSettings() {
+  const rows = await all('SELECT key, value, updated_at FROM settings');
   const out = { ...DEFAULT_SETTINGS };
   for (const row of rows) {
     try {
@@ -106,9 +106,9 @@ export function getAllSettings() {
   return out;
 }
 
-export function setSetting(key, value, updatedBy = null) {
+export async function setSetting(key, value, updatedBy = null) {
   const now = isoNow();
-  run(
+  await run(
     `INSERT INTO settings (key, value, updated_at, updated_by) VALUES (?, ?, ?, ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
     [key, JSON.stringify(value), now, updatedBy]
@@ -116,14 +116,14 @@ export function setSetting(key, value, updatedBy = null) {
   return value;
 }
 
-export function setSettings(entries, updatedBy = null) {
+export async function setSettings(entries, updatedBy = null) {
   for (const [key, value] of Object.entries(entries)) {
-    setSetting(key, value, updatedBy);
+    await setSetting(key, value, updatedBy);
   }
 }
 
-export function getPublicBranding() {
-  const s = getAllSettings();
+export async function getPublicBranding() {
+  const s = await getAllSettings();
   return {
     agencyName: s.agency_name || '',
     siteTitle: s.site_title || 'Payment Portal',
@@ -150,26 +150,26 @@ export function getPublicBranding() {
   };
 }
 
-export function getEnabledCurrencies() {
-  return all('SELECT * FROM currencies WHERE enabled = 1 ORDER BY sort_order, code').map((r) => ({
+export async function getEnabledCurrencies() {
+  return (await all('SELECT * FROM currencies WHERE enabled = 1 ORDER BY sort_order, code')).map((r) => ({
     code: r.code,
     name: r.name,
     symbol: r.symbol,
   }));
 }
 
-export function getCurrency(code) {
-  return get('SELECT * FROM currencies WHERE code = ?', [code]) || null;
+export async function getCurrency(code) {
+  return await get('SELECT * FROM currencies WHERE code = ?', [code]) || null;
 }
 
-export function getPaymentMethod(code) {
-  const row = get('SELECT * FROM payment_methods WHERE code = ?', [code]);
+export async function getPaymentMethod(code) {
+  const row = await get('SELECT * FROM payment_methods WHERE code = ?', [code]);
   if (!row) return null;
   return { ...row, enabled: !!row.enabled, config: parseJson(row.config, {}) };
 }
 
-export function getEnabledPaymentMethods() {
-  return all('SELECT * FROM payment_methods WHERE enabled = 1 ORDER BY sort_order, code').map((r) => ({
+export async function getEnabledPaymentMethods() {
+  return (await all('SELECT * FROM payment_methods WHERE enabled = 1 ORDER BY sort_order, code')).map((r) => ({
     ...r,
     enabled: !!r.enabled,
     config: parseJson(r.config, {}),
