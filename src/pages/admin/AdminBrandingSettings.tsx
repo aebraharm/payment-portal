@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { api } from '../../api/client';
+import { api, ApiError } from '../../api/client';
 import { useBranding } from '../../context/BrandingContext';
 import { Card, CardHeader } from '../../components/ui/Card';
 import { PageLoader } from '../../components/ui/Spinner';
@@ -16,11 +16,25 @@ type Settings = Record<string, any>;
 
 const HEX_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 
+/**
+ * Turn a failed request into a headline plus per-field reasons. The API returns
+ * one reason per invalid field in `error.details`; showing only the generic
+ * headline ("Some settings are invalid.") leaves the admin guessing what to fix.
+ */
+function describeError(err: unknown, fallback: string): { message: string; details: string[] } {
+  if (err instanceof ApiError) {
+    const details = (err.details ?? []).map((d) => d.message).filter(Boolean);
+    return { message: err.message || fallback, details };
+  }
+  return { message: err instanceof Error ? err.message : fallback, details: [] };
+}
+
 export function AdminBrandingSettings() {
   const { reload } = useBranding();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetails, setErrorDetails] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [tab, setTab] = useState('branding');
@@ -83,6 +97,7 @@ export function AdminBrandingSettings() {
     }
     setSaving(true);
     setError(null);
+    setErrorDetails([]);
     setMessage(null);
     try {
       await api.put('/api/admin/settings', { settings });
@@ -90,7 +105,9 @@ export function AdminBrandingSettings() {
       setPreview(null);
       await reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to save settings.');
+      const described = describeError(err, 'Unable to save settings.');
+      setError(described.message);
+      setErrorDetails(described.details);
     } finally {
       setSaving(false);
     }
@@ -105,11 +122,14 @@ export function AdminBrandingSettings() {
     }
     setPreviewing(true);
     setError(null);
+    setErrorDetails([]);
     try {
       const result = await api.post<{ preview: Settings }>('/api/admin/settings/preview', { settings });
       setPreview(result.preview);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to generate preview.');
+      const described = describeError(err, 'Unable to generate preview.');
+      setError(described.message);
+      setErrorDetails(described.details);
     } finally {
       setPreviewing(false);
     }
@@ -170,7 +190,18 @@ export function AdminBrandingSettings() {
         description="All agency information is editable here and saved to the database — no code changes required. Secrets and credentials are never stored in these settings."
       />
 
-      {error && <Alert tone="error">{error}</Alert>}
+      {error && (
+        <Alert tone="error">
+          {error}
+          {errorDetails.length > 0 && (
+            <ul className="mt-2 list-disc space-y-1 pl-5">
+              {errorDetails.map((detail) => (
+                <li key={detail}>{detail}</li>
+              ))}
+            </ul>
+          )}
+        </Alert>
+      )}
       {message && <Alert tone="success">{message}</Alert>}
 
       <Tabs
